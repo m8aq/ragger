@@ -87,7 +87,7 @@ def ingest(db_path: Path) -> None:
 
         for x, y, name in entries:
             conn.execute(
-                "INSERT INTO facilities (type, x, y, name) VALUES (?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO facilities (type, x, y, name) VALUES (?, ?, ?, ?)",
                 (facility.value, x, y, name),
             )
 

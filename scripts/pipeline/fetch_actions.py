@@ -361,7 +361,7 @@ def _insert_trigger(
     op: str,
 ) -> None:
     conn.execute(
-        "INSERT INTO action_triggers (action_id, trigger_type, source_id, target_id, op) VALUES (?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO action_triggers (action_id, trigger_type, source_id, target_id, op) VALUES (?, ?, ?, ?, ?)",
         (action_id, trigger_type.value, source_id, target_id, op),
     )
 

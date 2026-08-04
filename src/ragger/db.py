@@ -129,7 +129,8 @@ SCHEMAS: list[str] = [
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         location TEXT NOT NULL CHECK(location IN ({_diary_location_values})),
         tier TEXT NOT NULL CHECK(tier IN ({_diary_tier_values})),
-        description TEXT NOT NULL
+        description TEXT NOT NULL,
+        UNIQUE (location, tier, description)
     )
     """,
     f"""
@@ -545,13 +546,15 @@ SCHEMAS: list[str] = [
     f"""
     CREATE TABLE IF NOT EXISTS locations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
         region INTEGER CHECK(region IN ({_region_ids}) OR region IS NULL),
         type TEXT,
         members INTEGER NOT NULL DEFAULT 1,
         x INTEGER,
         y INTEGER,
-        facilities INTEGER NOT NULL DEFAULT 0
+        facilities INTEGER NOT NULL DEFAULT 0,
+        version TEXT,
+        UNIQUE(name, version)
     )
     """,
     """
@@ -941,6 +944,60 @@ SCHEMAS: list[str] = [
         PRIMARY KEY (spell_id, item_id),
         FOREIGN KEY (spell_id) REFERENCES teleport_spells(id),
         FOREIGN KEY (item_id) REFERENCES items(id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS wiki_pages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL UNIQUE,
+        source TEXT NOT NULL,
+        wikitext TEXT NOT NULL,
+        text TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS wiki_pages_source ON wiki_pages (source)
+    """,
+    # SQLite treats NULLs as distinct inside a UNIQUE constraint, so two rows that differ
+    # only by a NULL key column would not collide. These tables all have nullable key
+    # columns, so uniqueness is expressed as an expression index over COALESCE sentinels
+    # instead. Coordinates and ids are non-negative, so -1 is a safe stand-in for NULL.
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS map_links_unique ON map_links (
+        src_location,
+        dst_location,
+        COALESCE(src_x, -1),
+        COALESCE(src_y, -1),
+        COALESCE(dst_x, -1),
+        COALESCE(dst_y, -1),
+        COALESCE(type, ''),
+        COALESCE(description, '')
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS facilities_unique ON facilities (
+        type,
+        x,
+        y,
+        COALESCE(name, ''),
+        COALESCE(region, -1)
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS monster_drops_unique ON monster_drops (
+        monster_id,
+        item_name,
+        COALESCE(quantity, ''),
+        COALESCE(rarity, '')
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS action_triggers_unique ON action_triggers (
+        action_id,
+        trigger_type,
+        COALESCE(source_id, -1),
+        target_id,
+        op
     )
     """,
 ]

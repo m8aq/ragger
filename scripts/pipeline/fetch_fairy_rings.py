@@ -76,7 +76,7 @@ def ingest(db_path: Path) -> None:
             if i == j:
                 continue
             conn.execute(
-                """INSERT INTO map_links
+                """INSERT OR IGNORE INTO map_links
                    (src_location, dst_location, src_x, src_y, dst_x, dst_y, type, description)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (

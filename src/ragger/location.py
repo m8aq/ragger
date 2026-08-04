@@ -46,6 +46,14 @@ class Location:
     x: int | None = None
     y: int | None = None
     facilities: int = 0
+    version: str | None = None
+    """Disambiguator for locations sharing an infobox name, from the page title.
+
+    Four different temples all set `name = Temple` in their infobox, and
+    "Bandit Camp" is both a Kharidian Desert and a Wilderness location. Wiki
+    page titles are unique where infobox names are not, so the title supplies
+    the version: "Bandit Camp (Wilderness)" stores version "Wilderness".
+    """
 
     def has_facility(self, facility: Facility) -> bool:
         return bool(self.facilities & facility.mask)
@@ -59,7 +67,7 @@ class Location:
         conn: sqlite3.Connection,
         region: Region | None = None,
     ) -> list[Location]:
-        query = "SELECT id, name, region, type, members, x, y, facilities FROM locations"
+        query = "SELECT id, name, region, type, members, x, y, facilities, version FROM locations"
         params: list = []
 
         if region is not None:
@@ -81,7 +89,7 @@ class Location:
         mask = 0
         for f in facilities:
             mask |= f.mask
-        query = "SELECT id, name, region, type, members, x, y, facilities FROM locations WHERE facilities & ? = ?"
+        query = "SELECT id, name, region, type, members, x, y, facilities, version FROM locations WHERE facilities & ? = ?"
         params: list = [mask, mask]
         if region is not None:
             query += " AND region = ?"
@@ -100,7 +108,7 @@ class Location:
     ) -> Location | None:
         """Find the location with coordinates closest to the given point."""
         rows = conn.execute(
-            "SELECT id, name, region, type, members, x, y, facilities"
+            "SELECT id, name, region, type, members, x, y, facilities, version"
             " FROM locations WHERE x IS NOT NULL AND y IS NOT NULL",
         ).fetchall()
         best: Location | None = None
@@ -115,17 +123,35 @@ class Location:
         return best
 
     @classmethod
-    def by_name(cls, conn: sqlite3.Connection, name: str) -> Location | None:
-        row = conn.execute(
-            "SELECT id, name, region, type, members, x, y, facilities FROM locations WHERE name = ?",
-            (name,),
-        ).fetchone()
+    def by_name(cls, conn: sqlite3.Connection, name: str, version: str | None = None) -> Location | None:
+        """Look up a location by name, optionally disambiguated by version.
+
+        Names are not unique — pass `version` to pick between them (e.g.
+        "Bandit Camp" with version "Wilderness"). Without it the first match
+        by version order is returned; use `all_by_name` to see every variant.
+        """
+        query = "SELECT id, name, region, type, members, x, y, facilities, version FROM locations WHERE name = ?"
+        params: list = [name]
+        if version is not None:
+            query += " AND version = ?"
+            params.append(version)
+        row = conn.execute(query + " ORDER BY version IS NOT NULL, version", params).fetchone()
         return cls._from_row(row) if row else None
+
+    @classmethod
+    def all_by_name(cls, conn: sqlite3.Connection, name: str) -> list[Location]:
+        """Every location sharing this name, one per version."""
+        rows = conn.execute(
+            "SELECT id, name, region, type, members, x, y, facilities, version"
+            " FROM locations WHERE name = ? ORDER BY version IS NOT NULL, version",
+            (name,),
+        ).fetchall()
+        return [cls._from_row(row) for row in rows]
 
     @classmethod
     def search(cls, conn: sqlite3.Connection, name: str) -> list[Location]:
         rows = conn.execute(
-            "SELECT id, name, region, type, members, x, y, facilities FROM locations WHERE name LIKE ? ORDER BY name",
+            "SELECT id, name, region, type, members, x, y, facilities, version FROM locations WHERE name LIKE ? ORDER BY name",
             (f"%{name}%",),
         ).fetchall()
         return [cls._from_row(row) for row in rows]
@@ -141,6 +167,7 @@ class Location:
             x=row[5],
             y=row[6],
             facilities=row[7],
+            version=row[8],
         )
 
     def adjacencies(self, conn: sqlite3.Connection) -> list[Adjacency]:
@@ -196,7 +223,7 @@ class Location:
             return []
 
         rows = conn.execute(
-            """SELECT id, name, region, type, members, x, y, facilities FROM locations
+            """SELECT id, name, region, type, members, x, y, facilities, version FROM locations
                WHERE x IS NOT NULL AND y IS NOT NULL AND id != ?""",
             (self.id,),
         ).fetchall()

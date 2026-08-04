@@ -318,7 +318,7 @@ def ingest(db_path: Path) -> None:
             # Link drops (shared across versions unless specified otherwise)
             for drop in drops:
                 conn.execute(
-                    "INSERT INTO monster_drops (monster_id, item_name, quantity, rarity) VALUES (?, ?, ?, ?)",
+                    "INSERT OR IGNORE INTO monster_drops (monster_id, item_name, quantity, rarity) VALUES (?, ?, ?, ?)",
                     (monster_id, drop["item_name"], drop["quantity"], drop["rarity"]),
                 )
                 drop_count += 1

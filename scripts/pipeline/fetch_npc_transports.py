@@ -75,7 +75,7 @@ def _insert_link(
     quest_id: int | None,
 ) -> None:
     conn.execute(
-        """INSERT INTO map_links
+        """INSERT OR IGNORE INTO map_links
            (src_location, dst_location, src_x, src_y, dst_x, dst_y, type, description)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (src_loc, dst_loc, src_xy[0], src_xy[1], dst_xy[0], dst_xy[1],

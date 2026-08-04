@@ -5,6 +5,7 @@ for adjacency data.
 """
 
 import argparse
+import re
 from pathlib import Path
 
 from ragger.db import create_tables, get_connection
@@ -12,16 +13,40 @@ from ragger.wiki import (
     extract_coords,
     extract_template,
     fetch_category_members,
-    fetch_page_wikitext,
+    fetch_pages_wikitext,
     parse_template_param,
     populate_aliases_table,
     record_attributions_batch,
     resolve_region,
     strip_wiki_links,
-    throttle,
 )
 
 DIRECTIONS = ("north", "south", "east", "west")
+
+PARENTHETICAL = re.compile(r"\(([^)]+)\)\s*$")
+
+# leagueRegion values that legitimately mean "no region", so resolve_region
+# returning None for them is correct rather than an unhandled label.
+NO_REGION_LABELS = {"no", "n/a", "none", ""}
+
+
+def derive_version(page: str, name: str) -> str | None:
+    """Disambiguator for locations whose infobox name is not unique.
+
+    Wiki page titles are unique; infobox names frequently are not — four
+    separate temples all declare `name = Temple`, and both the Kharidian
+    Desert and Wilderness camps declare `name = Bandit Camp`. Keying only on
+    the infobox name silently collapses them into one row.
+
+    Prefers the page title's parenthetical ("Bandit Camp (Wilderness)" gives
+    "Wilderness"); otherwise falls back to the page title itself when it
+    differs from the name ("Lletya shrine" under name "Lletya").
+    """
+    if page == name:
+        return None
+
+    match = PARENTHETICAL.search(page)
+    return match.group(1) if match else page
 
 
 def parse_map_coords(wikitext: str) -> tuple[int | None, int | None]:
@@ -74,7 +99,7 @@ def parse_infobox_location(wikitext: str, page: str) -> dict | None:
     members_str = parse_template_param(block, "members")
 
     region = resolve_region(league_region)
-    if region is None and league_region:
+    if region is None and league_region and league_region.strip().lower() not in NO_REGION_LABELS:
         print(f"  Warning: unhandled leagueRegion '{league_region}' for '{name}'")
 
     if loc_type:
@@ -123,26 +148,36 @@ def ingest(db_path: Path) -> None:
     pages = fetch_category_members("Locations")
     print(f"Found {len(pages)} pages in Category:Locations")
 
+    all_wikitext = fetch_pages_wikitext(pages)
+
     location_count = 0
     adjacency_count = 0
     skipped = 0
+    page_to_id: dict[str, int] = {}
 
     for page in pages:
-        wikitext = fetch_page_wikitext(page)
+        wikitext = all_wikitext.get(page, "")
 
         infobox = parse_infobox_location(wikitext, page)
         if not infobox:
             skipped += 1
             continue
 
+        version = derive_version(page, infobox["name"])
+
         conn.execute(
-            "INSERT OR IGNORE INTO locations (name, region, type, members, x, y) VALUES (?, ?, ?, ?, ?, ?)",
-            (infobox["name"], infobox["region"], infobox["type"], infobox["members"], infobox["x"], infobox["y"]),
+            "INSERT OR IGNORE INTO locations (name, region, type, members, x, y, version)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (infobox["name"], infobox["region"], infobox["type"], infobox["members"],
+             infobox["x"], infobox["y"], version),
         )
-        loc_row = conn.execute("SELECT id FROM locations WHERE name = ?", (infobox["name"],)).fetchone()
+        loc_row = conn.execute(
+            "SELECT id FROM locations WHERE name = ? AND version IS ?", (infobox["name"], version),
+        ).fetchone()
         if not loc_row:
             continue
         loc_id = loc_row[0]
+        page_to_id[page] = loc_id
 
         adjacency = parse_adjacency(wikitext, page)
         for direction, neighbor in adjacency.items():
@@ -153,20 +188,19 @@ def ingest(db_path: Path) -> None:
             adjacency_count += 1
 
         location_count += 1
-        throttle()
 
     print("Recording attributions...")
     record_attributions_batch(conn, "locations", pages)
 
     print("Fetching location aliases from wiki redirects...")
-    location_lookup = {
-        name: id for id, name in conn.execute("SELECT id, name FROM locations").fetchall()
-    }
+    # Keyed by page title, not location name: `populate_aliases_table` looks up
+    # by page, and a disambiguated title ("Bandit Camp (Wilderness)") never
+    # matches the infobox name it was stored under.
     alias_count = populate_aliases_table(
         conn,
         pages,
         "INSERT OR IGNORE INTO location_aliases (location_id, alias) VALUES (?, ?)",
-        page_to_key=location_lookup.get,
+        page_to_key=page_to_id.get,
     )
     print(f"Inserted {alias_count} location aliases")
 
