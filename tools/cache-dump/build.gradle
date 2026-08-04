@@ -19,8 +19,8 @@ repositories {
 }
 
 dependencies {
-    implementation 'net.runelite:cache:1.12.24-SNAPSHOT'
-    implementation 'net.runelite:runelite-api:1.12.24-SNAPSHOT'
+    implementation 'net.runelite:cache:1.12.34.1'
+    implementation 'net.runelite:runelite-api:1.12.34.1'
     implementation 'com.google.code.gson:gson:2.11.0'
     implementation 'org.slf4j:slf4j-simple:2.0.16'
 }
