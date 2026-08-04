@@ -1,16 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "ragger"
-version = "0.1.0"
+dynamic = ["version"]
 description = "OSRS Leagues knowledge base for route planning"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib>=3.9.0",
+    "mcp[cli]>=1.0.0",
+    "numpy>=2.1.0",
     "pillow>=12.2.0",
+    "pyahocorasick>=2.1.0",
+    "pydantic>=2.9.0",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
+    "requests>=2.32.0",
     "scipy>=1.17.1",
-    "mcp[cli]>=1.0.0",
 ]
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
