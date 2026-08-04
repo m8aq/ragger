@@ -21,6 +21,8 @@ Actors address you as `claude:agent`. Your outbound mail arrives with `from` set
 
 When asked about OSRS game data (items, quests, monsters, equipment, locations, shops, spells, skills, etc.), run the Python API via Bash. The database is at `data/ragger.db` and the package is installed in the project environment.
 
+Game mechanics questions ("how does aggression work?", "what determines attack speed?") are answered from `ragger.wiki_page`, which stores reference pages as prose rather than typed columns — search page bodies with `WikiPage.search_text(conn, query)`.
+
 ```bash
 uv run python -c "
 import sqlite3

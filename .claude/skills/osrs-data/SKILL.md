@@ -1,6 +1,6 @@
 ---
 name: osrs-data
-description: Query the OSRS knowledge base for items, quests, monsters, equipment, locations, shops, spells, skills, and navigation. Use when answering questions about Old School RuneScape game data.
+description: Query the OSRS knowledge base for items, quests, monsters, equipment, locations, shops, spells, skills, navigation, and game mechanics (attack speed, aggression, drop rates, damage formulas). Use when answering questions about Old School RuneScape game data or mechanics.
 user-invocable: false
 allowed-tools: Bash
 ---
@@ -167,6 +167,26 @@ DiaryTask.all(conn, location=None, tier=None) -> list[DiaryTask]
 ```
 DiaryLocation enum: ARDOUGNE, DESERT, FALADOR, FREMENNIK, KANDARIN, KARAMJA, KOUREND_AND_KEBOS, LUMBRIDGE_AND_DRAYNOR, MORYTANIA, VARROCK, WESTERN_PROVINCES, WILDERNESS
 DiaryTier enum: EASY, MEDIUM, HARD, ELITE
+
+### Game Mechanics (`ragger.wiki_page`) — reference prose, not typed rows
+```
+WikiPage.by_title(conn, title) -> WikiPage | None
+WikiPage.search(conn, title, source=None) -> list[WikiPage]       # partial match on title
+WikiPage.search_text(conn, query, source=None) -> list[WikiPage]  # partial match on page body
+WikiPage.titles(conn, source=None) -> list[str]                   # enumerate without loading bodies
+```
+Fields: id, title, source, wikitext (raw), text (markup stripped)
+
+Use this for "how does X work?" questions that no other module answers — attack speed and weapon speed tables, aggression and aggro range, drop rate mechanics, damage-per-second formulas, dragonfire, degradation, tick manipulation, items kept on death, special attacks. 174 pages from `Category:Mechanics`.
+
+These pages have no infobox, so nothing is parsed into columns — read `page.text` and answer from it. Search the body, not just the title, because the relevant page is often not named after the term:
+```python
+from ragger.wiki_page import WikiPage
+for p in WikiPage.search_text(conn, "aggression range"):
+    print(p.title, p.text[:500])
+```
+
+**Numbers on these pages are prose, not computed values.** There is no max-hit or DPS calculator in this codebase. `ragger.combat` provides only `combat_level()` and attack-style XP splits. For a damage question, quote the formula from `Damage per second/Melee` and the inputs from `Equipment`/`Monster` rather than asserting a computed result.
 
 ## Enums (`ragger.enums`)
 
