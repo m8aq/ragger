@@ -47,7 +47,7 @@ STEP_TABLES = {
     "fetch_npc_locations": "npc_locations",
     "fetch_actions": "actions",
     "fetch_wiki_vars": "game_vars",
-    "fetch_mechanics": "wiki_pages",
+    "fetch_category": "wiki_pages",
     "fetch_dialogues": "dialogue_pages",
     "fetch_page_categories": "page_categories",
     "compute_dialogue_tags": "dialogue_tags",

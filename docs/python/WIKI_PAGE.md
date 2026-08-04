@@ -22,10 +22,12 @@ page.wikitext -> str                                           # raw wiki source
 page.text -> str                                               # markup stripped
 ```
 
-Populated by `scripts/pipeline/fetch_mechanics.py`, which defaults to `Category:Mechanics` and accepts `--category` for any other category of reference prose.
+Populated by `scripts/pipeline/fetch_category.py`. With no arguments it ingests every non-redirect article in the main namespace apart from those filtered out as non-content, and stamps `source` as `Content`. With `--category NAME` it ingests only that category's members and stamps `source` with the category name.
 
 ```sh
-uv run python scripts/pipeline/fetch_mechanics.py [--db data/ragger.db] [--category Mechanics]
+uv run python scripts/pipeline/fetch_category.py [--db data/ragger.db] [--category Mechanics]
 ```
+
+A full run replaces the whole table, because it is a superset of any single-category run and `title` is `UNIQUE` — leaving old rows behind would make `INSERT OR IGNORE` keep a stale body under its old source.
 
 Note that `all()` loads every page body. Use `titles()` to enumerate.

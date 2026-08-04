@@ -55,7 +55,7 @@ SCRIPTS = [
     "scripts/pipeline/fetch_npc_transports.py",
     "scripts/pipeline/fetch_actions.py",
     "scripts/pipeline/fetch_wiki_vars.py",
-    "scripts/pipeline/fetch_mechanics.py",
+    "scripts/pipeline/fetch_category.py",
     "scripts/pipeline/fetch_object_transports.py",
     "scripts/pipeline/fetch_dialogues.py",
     # Category mapping (depends on all entity tables + wiki_categories)

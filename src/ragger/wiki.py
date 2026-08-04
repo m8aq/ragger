@@ -373,6 +373,45 @@ def fetch_category_members(
     return _cap(sorted(pages))
 
 
+def fetch_all_article_pages(namespace: int = 0) -> list[str]:
+    """List every non-redirect page title in a namespace via list=allpages.
+
+    Enumerating the whole article namespace costs ~83 requests at 500 titles
+    each, against ~1,500 for walking every category in the graph one at a time.
+    Category membership is only needed to decide what to *drop*, so the cheap
+    enumeration plus a targeted exclusion pass beats crawling the graph.
+    """
+    pages: list[str] = []
+    params = {
+        "action": "query",
+        "list": "allpages",
+        "apnamespace": str(namespace),
+        "aplimit": "500",
+        "apfilterredir": "nonredirects",
+        "format": "json",
+    }
+
+    for _page in range(API_MAX_CONTINUATIONS * 20):
+        resp = api_get(params)
+        data = resp.json()
+
+        pages.extend(p["title"] for p in data["query"]["allpages"])
+
+        if "continue" in data:
+            params["apcontinue"] = data["continue"]["apcontinue"]
+            throttle()
+        else:
+            break
+    else:
+        raise RuntimeError(
+            f"Namespace {namespace} still had more pages after "
+            f"{API_MAX_CONTINUATIONS * 20} continuations ({len(pages)} collected). "
+            "Raise the limit — returning a partial list would silently truncate the build."
+        )
+
+    return _cap(sorted(pages))
+
+
 def fetch_page_wikitext(page: str, cache: WikiCache | None = ...) -> str:
     """Fetch the raw wikitext for a wiki page.
 
