@@ -14,13 +14,12 @@ from ragger.wiki import (
     SKILL_NAME_MAP,
     extract_section,
     fetch_category_members,
-    fetch_page_wikitext,
+    fetch_pages_wikitext,
     link_group_requirement,
     link_requirement,
     parse_skill_requirements,
     populate_aliases_table,
     record_attributions_batch,
-    throttle,
 )
 
 # Pages in the Quests category that aren't actual quests
@@ -195,11 +194,8 @@ def ingest(db_path: Path) -> None:
     conn = get_connection(db_path)
 
     print(f"Fetching data for {len(quest_names)} quests...")
-    quest_data: list[QuestData] = []
-    for title in quest_names:
-        wikitext = fetch_page_wikitext(title)
-        quest_data.append(parse_quest_wikitext(title, wikitext))
-        throttle()
+    all_wikitext = fetch_pages_wikitext(quest_names)
+    quest_data = [parse_quest_wikitext(title, all_wikitext.get(title, "")) for title in quest_names]
 
     print("Recording attributions...")
     record_attributions_batch(conn, "quests", quest_names)

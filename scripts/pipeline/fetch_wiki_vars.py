@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ragger.db import create_tables, get_connection
 from ragger.wiki import (
+    _cap,
     fetch_pages_wikitext_batch,
     record_attributions_batch,
     strip_markup,
@@ -86,7 +87,7 @@ def enumerate_var_pages(session, prefix: str, namespace: int = 4) -> list[str]:
             time.sleep(0.5)
         else:
             break
-    return pages
+    return _cap(pages)
 
 
 # ---------------------------------------------------------------------------

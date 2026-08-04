@@ -11,12 +11,11 @@ from pathlib import Path
 from ragger.db import create_tables, get_connection
 from ragger.enums import DiaryLocation
 from ragger.wiki import (
-    fetch_page_wikitext,
+    fetch_pages_wikitext,
     link_group_requirement,
     parse_skill_requirements,
     record_attributions_batch,
     strip_markup,
-    throttle,
 )
 
 # Map enum values to wiki page titles
@@ -114,8 +113,10 @@ def ingest(db_path: Path) -> None:
     skill_req_count = 0
     quest_req_count = 0
 
+    all_wikitext = fetch_pages_wikitext(list(DIARY_PAGES.values()))
+
     for location, page in DIARY_PAGES.items():
-        wikitext = fetch_page_wikitext(page)
+        wikitext = all_wikitext.get(page, "")
         tasks = parse_diary_tasks(wikitext)
 
         for task in tasks:
@@ -155,7 +156,6 @@ def ingest(db_path: Path) -> None:
 
         total += len(tasks)
         print(f"  {location.value}: {len(tasks)} tasks")
-        throttle()
 
     print("Recording attributions...")
     record_attributions_batch(conn, "diary_tasks", list(DIARY_PAGES.values()))

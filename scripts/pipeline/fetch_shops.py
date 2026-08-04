@@ -15,12 +15,11 @@ from ragger.enums import ShopType
 from ragger.wiki import (
     extract_template,
     fetch_category_members,
-    fetch_page_wikitext,
+    fetch_pages_wikitext,
     parse_template_param,
     record_attributions_batch,
     resolve_region,
     strip_wiki_links,
-    throttle,
 )
 
 
@@ -149,12 +148,14 @@ def ingest(db_path: Path) -> None:
     pages = fetch_category_members("Shops")
     print(f"Found {len(pages)} pages in Category:Shops")
 
+    all_wikitext = fetch_pages_wikitext(pages)
+
     shop_count = 0
     item_count = 0
     shop_pages: list[str] = []
 
     for page in pages:
-        wikitext = fetch_page_wikitext(page)
+        wikitext = all_wikitext.get(page, "")
 
         if "{{StoreTableHead" not in wikitext:
             continue
@@ -219,7 +220,6 @@ def ingest(db_path: Path) -> None:
 
         shop_count += 1
         shop_pages.append(page)
-        throttle()
 
     print("Recording attributions...")
     record_attributions_batch(conn, "shops", shop_pages)

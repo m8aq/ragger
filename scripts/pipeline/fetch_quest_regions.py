@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ragger.db import create_tables, get_connection
 from ragger.enums import Region
-from ragger.wiki import fetch_page_wikitext, link_group_requirement, record_attributions_batch, throttle
+from ragger.wiki import fetch_pages_wikitext, link_group_requirement, record_attributions_batch
 
 REGION_REQ_PATTERN = re.compile(r"\{\{(?:RE|LeagueRegion)\|(\w[\w\s]*)\}\}")
 
@@ -83,11 +83,13 @@ def ingest(db_path: Path) -> None:
     quest_ids = dict(conn.execute("SELECT name, id FROM quests").fetchall())
 
     print(f"Fetching leagueRegion for {len(quest_ids)} quests...")
+    all_wikitext = fetch_pages_wikitext(list(quest_ids.keys()))
+
     req_count = 0
     no_region = 0
 
     for quest_name, quest_id in quest_ids.items():
-        wikitext = fetch_page_wikitext(quest_name)
+        wikitext = all_wikitext.get(quest_name, "")
 
         mask = parse_league_region(wikitext)
         if mask == 0:
@@ -105,7 +107,6 @@ def ingest(db_path: Path) -> None:
                     quest_id,
                 )
                 req_count += 1
-        throttle()
 
     print("Recording attributions...")
     record_attributions_batch(conn, "quest_requirement_groups", list(quest_ids.keys()))

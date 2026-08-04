@@ -59,18 +59,13 @@ class WikiCache:
 
         for i in range(0, len(titles), WIKI_BATCH_SIZE):
             batch = titles[i:i + WIKI_BATCH_SIZE]
-            resp = requests.get(
-                API_URL,
-                params={
-                    "action": "query",
-                    "titles": "|".join(batch),
-                    "prop": "revisions",
-                    "rvprop": "ids",
-                    "format": "json",
-                },
-                headers=HEADERS,
-            )
-            resp.raise_for_status()
+            resp = api_get({
+                "action": "query",
+                "titles": "|".join(batch),
+                "prop": "revisions",
+                "rvprop": "ids",
+                "format": "json",
+            })
             current: dict[str, int] = {}
             for _, page_data in resp.json().get("query", {}).get("pages", {}).items():
                 title = page_data.get("title", "")
@@ -182,6 +177,86 @@ API_URL = "https://oldschool.runescape.wiki/api.php"
 USER_AGENT = "ragger/0.2 (https://github.com/iamacoffeepot/ragger) OSRS Leagues planner"
 HEADERS = {"User-Agent": USER_AGENT}
 
+API_MAX_ATTEMPTS = 5
+
+# (connect, read) rather than a single number. requests applies a timeout per
+# socket operation, not to the request as a whole, so a connection that stays
+# open while delivering nothing can hang far longer than one combined value
+# suggests. A short read timeout turns that into a retry instead of a stall.
+API_TIMEOUT = (10, 30)
+
+# Upper bound on MediaWiki continuation pages for a single query. Continuation
+# loops are `while True`, so a continuation token that never advances would spin
+# forever, unthrottled and silent.
+API_MAX_CONTINUATIONS = 50
+
+# Smoke-test knobs. Every large pipeline step draws its work list from
+# fetch_category_members or fetch_template_users, so capping those two shrinks
+# the whole pipeline; steps driven by upstream tables shrink automatically
+# because their inputs do. Attribution and alias lookups are pure network with
+# no parsing to exercise, so they are skipped rather than capped.
+def _env_flag(name: str) -> bool:
+    """Read a boolean env var, treating "0"/"false"/"no" as off.
+
+    A bare `bool(os.environ.get(...))` would read "0" as True, so setting the
+    variable to 0 to disable it would silently leave it enabled.
+    """
+    return os.environ.get(name, "").strip().lower() not in ("", "0", "false", "no")
+
+
+MAX_PAGES = int(os.environ.get("RAGGER_MAX_PAGES", 0) or 0)
+SKIP_ATTRIBUTION = _env_flag("RAGGER_SKIP_ATTRIBUTION")
+
+# True when this process would produce a deliberately incomplete database.
+# `fetch_all.py` refuses to run in this state so a production build can never
+# be silently truncated by a stray environment variable.
+SAMPLING = bool(MAX_PAGES) or SKIP_ATTRIBUTION
+
+
+def _cap(pages: list[str]) -> list[str]:
+    """Truncate an enumeration to RAGGER_MAX_PAGES, if that limit is set."""
+    if MAX_PAGES and len(pages) > MAX_PAGES:
+        print(f"  RAGGER_MAX_PAGES={MAX_PAGES}: using {MAX_PAGES} of {len(pages)} pages")
+        return pages[:MAX_PAGES]
+    return pages
+
+
+def api_get(params: dict) -> requests.Response:
+    """GET the wiki API, retrying transient failures with exponential backoff.
+
+    The wiki intermittently returns 502/503 under load and connections drop.
+    A full ingestion run makes thousands of requests over a couple of hours,
+    and `fetch_all.py` aborts the whole pipeline on any script failure — so
+    letting one blip propagate throws away the entire run.
+
+    Retries on connection errors and on 5xx / 429 responses. Client errors
+    other than 429 are not retried: they will fail identically next time.
+    """
+    last_error: Exception | None = None
+
+    for attempt in range(API_MAX_ATTEMPTS):
+        try:
+            resp = requests.get(API_URL, params=params, headers=HEADERS, timeout=API_TIMEOUT)
+        except requests.RequestException as e:
+            last_error = e
+        else:
+            if resp.status_code < 500 and resp.status_code != 429:
+                # Raises out of this `else` block uncaught: a 4xx will fail the
+                # same way on every attempt, so retrying only delays the error.
+                resp.raise_for_status()
+                return resp
+            last_error = requests.HTTPError(f"{resp.status_code} from wiki API", response=resp)
+
+        if attempt == API_MAX_ATTEMPTS - 1:
+            break
+
+        delay = 2.0 ** attempt
+        print(f"  Wiki API {type(last_error).__name__}, retrying in {delay:.0f}s "
+              f"({attempt + 1}/{API_MAX_ATTEMPTS - 1})")
+        time.sleep(delay)
+
+    raise last_error
+
 SKILL_NAME_MAP: dict[str, Skill] = {s.label.lower(): s for s in Skill}
 
 SKILL_REQ_PATTERN = re.compile(r"\{\{SCP\|(\w+)\|(\d+)")
@@ -265,9 +340,8 @@ def fetch_category_members(
         "format": "json",
     }
 
-    while True:
-        resp = requests.get(API_URL, params=params, headers=HEADERS)
-        resp.raise_for_status()
+    for _page in range(API_MAX_CONTINUATIONS):
+        resp = api_get(params)
         data = resp.json()
 
         for member in data["query"]["categorymembers"]:
@@ -289,8 +363,14 @@ def fetch_category_members(
             params["cmcontinue"] = data["continue"]["cmcontinue"]
         else:
             break
+    else:
+        raise RuntimeError(
+            f"Category {category!r} still had more pages after {API_MAX_CONTINUATIONS} "
+            f"continuations ({len(pages)} collected). Raise API_MAX_CONTINUATIONS — "
+            "returning a partial list would silently truncate the build."
+        )
 
-    return sorted(pages)
+    return _cap(sorted(pages))
 
 
 def fetch_page_wikitext(page: str, cache: WikiCache | None = ...) -> str:
@@ -314,12 +394,9 @@ def fetch_page_wikitext(page: str, cache: WikiCache | None = ...) -> str:
             if current_revid is not None and current_revid == cached_revid:
                 return cached_text
 
-    resp = requests.get(
-        API_URL,
-        params={"action": "parse", "page": page, "prop": "wikitext", "format": "json"},
-        headers=HEADERS,
+    resp = api_get(
+        {"action": "parse", "page": page, "prop": "wikitext", "format": "json"},
     )
-    resp.raise_for_status()
     parse_data = resp.json().get("parse", {})
     wikitext = parse_data.get("wikitext", {}).get("*", "")
     revid = parse_data.get("revid", 0)
@@ -332,18 +409,15 @@ def fetch_page_wikitext(page: str, cache: WikiCache | None = ...) -> str:
 
 def _fetch_revid(page: str) -> int | None:
     """Fetch the latest revision ID for a page (cheap, no content)."""
-    resp = requests.get(
-        API_URL,
-        params={
+    resp = api_get(
+        {
             "action": "query",
             "titles": page,
             "prop": "revisions",
             "rvprop": "ids",
             "format": "json",
         },
-        headers=HEADERS,
     )
-    resp.raise_for_status()
     for _, page_data in resp.json().get("query", {}).get("pages", {}).items():
         revisions = page_data.get("revisions", [])
         if revisions:
@@ -356,18 +430,15 @@ def _fetch_revids_batch(pages: list[str]) -> dict[str, int]:
     result: dict[str, int] = {}
     for i in range(0, len(pages), WIKI_BATCH_SIZE):
         batch = pages[i:i + WIKI_BATCH_SIZE]
-        resp = requests.get(
-            API_URL,
-            params={
+        resp = api_get(
+            {
                 "action": "query",
                 "titles": "|".join(batch),
                 "prop": "revisions",
                 "rvprop": "ids",
                 "format": "json",
             },
-            headers=HEADERS,
         )
-        resp.raise_for_status()
         for _, page_data in resp.json().get("query", {}).get("pages", {}).items():
             title = page_data.get("title", "")
             revisions = page_data.get("revisions", [])
@@ -440,8 +511,7 @@ def fetch_pages_wikitext_batch(
             "rvslots": "main",
             "format": "json",
         }
-        resp = requests.get(API_URL, params=params, headers=HEADERS)
-        resp.raise_for_status()
+        resp = api_get(params)
         data = resp.json()
 
         to_cache: dict[str, tuple[str, int]] = {}
@@ -460,6 +530,30 @@ def fetch_pages_wikitext_batch(
             cache.put_batch(to_cache)
 
         throttle()
+
+    return result
+
+
+def fetch_pages_wikitext(pages: list[str], cache: WikiCache | None = ...) -> dict[str, str]:
+    """Fetch wikitext for many pages, batched 50 per request.
+
+    Prefer this over calling ``fetch_page_wikitext`` in a loop: one request per
+    50 pages instead of one per page, and the batch path throttles between
+    requests where the single-page path does not.
+
+    Any title the batch does not return — a redirect, or a title the API
+    normalises differently — is retried individually so it is never silently
+    dropped.
+    """
+    result = fetch_pages_wikitext_batch(pages, cache=cache)
+
+    missing = [p for p in pages if p not in result]
+    if missing:
+        print(f"  Batch missed {len(missing)} page(s), fetching individually")
+        for page in missing:
+            wikitext = fetch_page_wikitext(page, cache=cache)
+            if wikitext:
+                result[page] = wikitext
 
     return result
 
@@ -601,9 +695,8 @@ def fetch_template_users(template_name: str) -> list[str]:
         "format": "json",
     }
 
-    while True:
-        resp = requests.get(API_URL, params=params, headers=HEADERS)
-        resp.raise_for_status()
+    for _page in range(API_MAX_CONTINUATIONS):
+        resp = api_get(params)
         data = resp.json()
 
         for item in data["query"]["embeddedin"]:
@@ -613,8 +706,14 @@ def fetch_template_users(template_name: str) -> list[str]:
             params["eicontinue"] = data["continue"]["eicontinue"]
         else:
             break
+    else:
+        raise RuntimeError(
+            f"Template {template_name!r} still had more users after {API_MAX_CONTINUATIONS} "
+            f"continuations ({len(pages)} collected). Raise API_MAX_CONTINUATIONS — "
+            "returning a partial list would silently truncate the build."
+        )
 
-    return sorted(pages)
+    return _cap(sorted(pages))
 
 
 def extract_section(wikitext: str, field_name: str) -> str:
@@ -861,6 +960,10 @@ def populate_aliases_table(
     the alias text. Commits after the bulk insert. Returns the number of
     alias rows inserted.
     """
+    if SKIP_ATTRIBUTION:
+        print(f"  RAGGER_SKIP_ATTRIBUTION: skipping redirect lookup for {len(pages)} pages")
+        return 0
+
     rows: list[tuple[object, str]] = []
     for i in range(0, len(pages), WIKI_BATCH_SIZE):
         batch = pages[i:i + WIKI_BATCH_SIZE]
@@ -900,9 +1003,8 @@ def fetch_redirects_batch(pages: list[str]) -> dict[str, list[str]]:
             "rdprop": "title",
             "format": "json",
         }
-        while True:
-            resp = requests.get(API_URL, params=params, headers=HEADERS)
-            resp.raise_for_status()
+        for continuation in range(API_MAX_CONTINUATIONS):
+            resp = api_get(params)
             data = resp.json()
             for _, page_data in data.get("query", {}).get("pages", {}).items():
                 title = page_data.get("title", "")
@@ -916,6 +1018,12 @@ def fetch_redirects_batch(pages: list[str]) -> dict[str, list[str]]:
             if not cont:
                 break
             params["rdcontinue"] = cont
+            # Continuation pages are extra round trips to the wiki, so they get
+            # the same courtesy delay as any other request.
+            throttle()
+        else:
+            print(f"  Warning: gave up paginating redirects after "
+                  f"{API_MAX_CONTINUATIONS} continuations for batch starting {batch[0]!r}")
         throttle()
 
     return result
@@ -936,9 +1044,8 @@ def fetch_contributors_batch(pages: list[str]) -> dict[str, list[str]]:
         "format": "json",
     }
 
-    while True:
-        resp = requests.get(API_URL, params=params, headers=HEADERS)
-        resp.raise_for_status()
+    for _page in range(API_MAX_CONTINUATIONS):
+        resp = api_get(params)
         data = resp.json()
 
         for _, page_data in data["query"]["pages"].items():
@@ -951,6 +1058,8 @@ def fetch_contributors_batch(pages: list[str]) -> dict[str, list[str]]:
             params["pccontinue"] = data["continue"]["pccontinue"]
         else:
             break
+    else:
+        print(f"  Warning: contributor list truncated after {API_MAX_CONTINUATIONS} continuations")
 
     return result
 
@@ -983,6 +1092,10 @@ def record_attributions_batch(
     table_names can be a single string or a list of table names to attribute.
     Pages are processed in batches of WIKI_BATCH_SIZE (API limit).
     """
+    if SKIP_ATTRIBUTION:
+        print(f"  RAGGER_SKIP_ATTRIBUTION: skipping contributor lookup for {len(pages)} pages")
+        return
+
     if isinstance(table_names, str):
         table_names = [table_names]
     for i in range(0, len(pages), WIKI_BATCH_SIZE):
