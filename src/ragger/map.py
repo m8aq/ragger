@@ -148,11 +148,17 @@ class MapSquare:
         x_min: int, x_max: int, y_min: int, y_max: int,
         plane: int = 0,
     ) -> tuple:
-        """Stitch BLOB map squares into a uint16 grid at 1 px per tile.
+        """Stitch BLOB map squares into a uint32 grid at 1 px per tile.
 
-        Unlike `stitch`, this preserves the 16-bit blob IDs instead of
-        converting to RGB. Returns (grid, extent) where `grid[py, px]` is the
-        blob ID at `px = gx - extent[0]`, `py = extent[3] - 1 - gy`. 0 = blocked.
+        Unlike `stitch`, this preserves the blob IDs instead of converting to
+        RGB. Returns (grid, extent) where `grid[py, px]` is the blob ID at
+        `px = gx - extent[0]`, `py = extent[3] - 1 - gy`. 0 = blocked.
+
+        Blob IDs are stored as RGBA, four bytes making a little-endian uint32.
+        PNG allows at most 16 bits per channel, and four planes of blobs run to
+        ~63,000 — close enough to the 65,535 a single 16-bit channel holds that
+        it had to be widened. Squares written before the change are 16-bit
+        greyscale and are still read correctly.
         """
         import io
 
@@ -166,7 +172,7 @@ class MapSquare:
 
         W = (rx_max - rx_min + 1) * GAME_TILES_PER_REGION
         H = (ry_max - ry_min + 1) * GAME_TILES_PER_REGION
-        grid = np.zeros((H, W), dtype=np.uint16)
+        grid = np.zeros((H, W), dtype=np.uint32)
 
         rows = conn.execute(
             "SELECT region_x, region_y, image FROM map_squares "
@@ -175,7 +181,13 @@ class MapSquare:
             (plane, MapSquareType.BLOB.value, rx_min, rx_max, ry_min, ry_max),
         ).fetchall()
         for rx, ry, img_data in rows:
-            tile = np.asarray(Image.open(io.BytesIO(img_data)), dtype=np.uint16)
+            img = Image.open(io.BytesIO(img_data))
+            if img.mode == "RGBA":
+                rgba = np.asarray(img, dtype=np.uint8)
+                tile = np.ascontiguousarray(rgba).view("<u4").reshape(rgba.shape[:2])
+            else:
+                # Pre-32-bit square: 16-bit greyscale.
+                tile = np.asarray(img, dtype=np.uint32)
             px = (rx - rx_min) * GAME_TILES_PER_REGION
             py = (ry_max - ry) * GAME_TILES_PER_REGION
             grid[py:py + GAME_TILES_PER_REGION, px:px + GAME_TILES_PER_REGION] = tile
@@ -942,7 +954,14 @@ def blob_at(conn: sqlite3.Connection, x: int, y: int, plane: int = 0) -> int:
 
     tile_x = x - region_x * GAME_TILES_PER_REGION
     tile_y = y - region_y * GAME_TILES_PER_REGION
-    arr = np.asarray(Image.open(io.BytesIO(ms.image)), dtype=np.uint16)
+    img = Image.open(io.BytesIO(ms.image))
+    if img.mode == "RGBA":
+        rgba = np.asarray(img, dtype=np.uint8)
+        arr = np.ascontiguousarray(rgba).view("<u4").reshape(rgba.shape[:2])
+    else:
+        # Pre-32-bit square: 16-bit greyscale.
+        arr = np.asarray(img, dtype=np.uint32)
+
     py = GAME_TILES_PER_REGION - 1 - tile_y
     px = tile_x
     return int(arr[py, px])

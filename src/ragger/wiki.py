@@ -1075,9 +1075,20 @@ def record_attribution(
     wiki_page: str,
     authors: list[str],
 ) -> None:
-    """Record an attribution entry for a wiki page that was used to populate a table."""
+    """Record an attribution entry for a wiki page that was used to populate a table.
+
+    Upserts on (table_name, wiki_page). A plain INSERT appended a fresh copy of
+    every row on each run, and because `fetched_at` differs each time the
+    duplicates were not even visible to a full-row comparison — the v0.5.0
+    release carried 607,035 rows for 44,533 real attributions, about 175 MB of
+    the published database.
+    """
     conn.execute(
-        "INSERT INTO attributions (table_name, wiki_page, authors, fetched_at) VALUES (?, ?, ?, datetime('now'))",
+        """INSERT INTO attributions (table_name, wiki_page, authors, fetched_at)
+           VALUES (?, ?, ?, datetime('now'))
+           ON CONFLICT(table_name, wiki_page) DO UPDATE SET
+               authors = excluded.authors,
+               fetched_at = excluded.fetched_at""",
         (table_name, wiki_page, ", ".join(authors)),
     )
 

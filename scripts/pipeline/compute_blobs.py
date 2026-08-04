@@ -4,11 +4,14 @@ For each Voronoi cell (location), flood fills walkable tiles using the full
 collision model (directional walls, water, void, diagonal corner checks) and
 assigns each maximal connected region a global blob ID.
 
-The per-tile blob grid is written back as 16-bit PNG map squares of
-`MapSquareType.BLOB` — one row per 64x64 region, pixel value = global blob ID
-(0 = blocked / no blob). A companion `blobs` table maps each global ID to its
-owning location and tile count so downstream consumers can reason about blob
-membership without rasterizing.
+The per-tile blob grid is written back as RGBA PNG map squares of
+`MapSquareType.BLOB` — one row per 64x64 region, the four bytes of each pixel
+forming a little-endian uint32 blob ID (0 = blocked / no blob). A companion
+`blobs` table maps each global ID to its owning location and tile count so
+downstream consumers can reason about blob membership without rasterizing.
+
+The raster was 16-bit greyscale until computing all four planes pushed the id
+count to ~63,000, uncomfortably close to the 65,535 ceiling that format allows.
 """
 
 import argparse
@@ -189,10 +192,15 @@ def cell_blobs(
 
 
 def encode_region_png(tile: np.ndarray) -> bytes:
-    """Encode a 64x64 uint16 tile as a 16-bit grayscale PNG."""
-    if tile.dtype != np.uint16:
-        tile = tile.astype(np.uint16)
-    img = Image.frombytes("I;16", (tile.shape[1], tile.shape[0]), tile.tobytes())
+    """Encode a 64x64 blob-id tile as an RGBA PNG, four bytes per id.
+
+    PNG carries at most 16 bits per channel, so a 32-bit id is split across the
+    four RGBA bytes in little-endian order. The previous 16-bit greyscale format
+    capped ids at 65,535, and four planes of blobs reach ~63,000.
+    """
+    tile = np.ascontiguousarray(tile, dtype="<u4")
+    rgba = tile.view(np.uint8).reshape(tile.shape[0], tile.shape[1], 4)
+    img = Image.frombytes("RGBA", (tile.shape[1], tile.shape[0]), rgba.tobytes())
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
@@ -369,7 +377,7 @@ def ingest(db_path: Path, debug: bool = False) -> None:
         flags_grid = build_flags_grid(collision, water)
         del collision, water
         H, W = flags_grid.shape
-        blob_grid = np.zeros((H, W), dtype=np.uint16)
+        blob_grid = np.zeros((H, W), dtype=np.uint32)
 
         for world_name, y_op, y_threshold in [
             ("overworld", "<", Y_WORLD_SPLIT), ("underworld", ">=", Y_WORLD_SPLIT)
@@ -410,16 +418,15 @@ def ingest(db_path: Path, debug: bool = False) -> None:
                 if n_blobs == 0:
                     continue
 
-                # Blob ids are written into a 16-bit PNG raster, so the global
-                # counter must stay under 65,535 across every plane. Failing
-                # loudly beats silently wrapping ids onto each other.
-                if next_blob_id + n_blobs > 65535:
+                # Ids are written into a 32-bit RGBA raster. The ceiling is far
+                # away now, but wrapping would silently merge unrelated blobs, so
+                # it is still asserted rather than assumed.
+                if next_blob_id + n_blobs > 0xFFFFFFFF:
                     raise ValueError(
-                        f"Blob id {next_blob_id + n_blobs} exceeds the uint16 raster limit. "
-                        "Widen the blob map square encoding before adding more planes."
+                        f"Blob id {next_blob_id + n_blobs} exceeds the uint32 raster limit."
                     )
 
-                global_ids = np.arange(next_blob_id, next_blob_id + n_blobs, dtype=np.uint16)
+                global_ids = np.arange(next_blob_id, next_blob_id + n_blobs, dtype=np.uint32)
 
                 write_mask = labels > 0
                 blob_grid[bby_min:bby_max, bbx_min:bbx_max][write_mask] = global_ids[labels[write_mask] - 1]

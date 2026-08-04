@@ -538,7 +538,8 @@ SCHEMAS: list[str] = [
         table_name TEXT NOT NULL,
         wiki_page TEXT NOT NULL,
         authors TEXT,
-        fetched_at TEXT NOT NULL
+        fetched_at TEXT NOT NULL,
+        UNIQUE (table_name, wiki_page)
     )
     """,
     """
