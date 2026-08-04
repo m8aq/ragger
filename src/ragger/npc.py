@@ -129,11 +129,17 @@ class NpcLocation:
     name: str
     x: int
     y: int
+    plane: int = 0
+    source: str = "wiki"
+    """Where this spawn came from: "wiki" (parsed from Infobox NPC) or
+    "data_osrs" (observed spawns from mejrs/data_osrs)."""
+    combat_level: int | None = None
 
     @classmethod
     def by_game_id(cls, conn: sqlite3.Connection, game_id: int) -> list[NpcLocation]:
         rows = conn.execute(
-            "SELECT id, game_id, name, x, y FROM npc_locations WHERE game_id = ? ORDER BY x, y",
+            "SELECT id, game_id, name, x, y, plane, source, combat_level FROM npc_locations"
+            " WHERE game_id = ? ORDER BY plane, x, y",
             (game_id,),
         ).fetchall()
         return [cls._from_row(r) for r in rows]
@@ -141,21 +147,27 @@ class NpcLocation:
     @classmethod
     def by_name(cls, conn: sqlite3.Connection, name: str) -> list[NpcLocation]:
         rows = conn.execute(
-            "SELECT id, game_id, name, x, y FROM npc_locations WHERE name = ? ORDER BY game_id, x, y",
+            "SELECT id, game_id, name, x, y, plane, source, combat_level FROM npc_locations"
+            " WHERE name = ? ORDER BY game_id, plane, x, y",
             (name,),
         ).fetchall()
         return [cls._from_row(r) for r in rows]
 
     @classmethod
-    def near(cls, conn: sqlite3.Connection, x: int, y: int, radius: int = 50) -> list[NpcLocation]:
+    def near(
+        cls, conn: sqlite3.Connection, x: int, y: int, radius: int = 50, plane: int = 0,
+    ) -> list[NpcLocation]:
         rows = conn.execute(
-            """SELECT id, game_id, name, x, y FROM npc_locations
-               WHERE ABS(x - ?) <= ? AND ABS(y - ?) <= ?
+            """SELECT id, game_id, name, x, y, plane, source, combat_level FROM npc_locations
+               WHERE ABS(x - ?) <= ? AND ABS(y - ?) <= ? AND plane = ?
                ORDER BY ABS(x - ?) + ABS(y - ?)""",
-            (x, radius, y, radius, x, y),
+            (x, radius, y, radius, plane, x, y),
         ).fetchall()
         return [cls._from_row(r) for r in rows]
 
     @classmethod
     def _from_row(cls, row: tuple) -> NpcLocation:
-        return cls(id=row[0], game_id=row[1], name=row[2], x=row[3], y=row[4])
+        return cls(
+            id=row[0], game_id=row[1], name=row[2], x=row[3], y=row[4],
+            plane=row[5], source=row[6], combat_level=row[7],
+        )

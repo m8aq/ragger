@@ -316,26 +316,25 @@ def ingest(db_path: Path, debug: bool = False) -> None:
     create_tables(db_path)
     conn = get_connection(db_path)
 
-    print("Loading collision / water layers...")
+    # Every plane shares plane 0's bounding box so array indices mean the same
+    # tile on every floor. Upper planes only cover building interiors, so letting
+    # each derive its own extent would silently shift coordinates between them.
     bbox = conn.execute(
         "SELECT MIN(region_x), MAX(region_x), MIN(region_y), MAX(region_y) "
         "FROM map_squares WHERE plane = 0 AND type = 'collision'"
     ).fetchone()
     if bbox[0] is None:
         raise ValueError("No collision map squares in database. Run import_map_squares.py first.")
-    x_min = bbox[0] * GAME_TILES_PER_REGION
-    x_max = (bbox[1] + 1) * GAME_TILES_PER_REGION
-    y_min = bbox[2] * GAME_TILES_PER_REGION
-    y_max = (bbox[3] + 1) * GAME_TILES_PER_REGION
+    rx_min, rx_max, ry_min, ry_max = bbox
+    x_min = rx_min * GAME_TILES_PER_REGION
+    x_max = (rx_max + 1) * GAME_TILES_PER_REGION
+    y_min = ry_min * GAME_TILES_PER_REGION
+    y_max = (ry_max + 1) * GAME_TILES_PER_REGION
 
-    collision, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.COLLISION, region_padding=0)
-    water, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.WATER, region_padding=0)
-    flags_grid = build_flags_grid(collision, water)
-    del collision, water
-    H, W = flags_grid.shape
-    print(f"Full grid: {W}x{H} tiles ({x_min}-{x_max} x {y_min}-{y_max})")
-
-    blob_grid = np.zeros((H, W), dtype=np.uint16)
+    planes = [r[0] for r in conn.execute(
+        "SELECT DISTINCT plane FROM map_squares WHERE type = 'collision' ORDER BY plane"
+    )]
+    print(f"Collision data present for planes: {planes}")
 
     # Cascade clear all downstream tables that reference blobs.id — ports,
     # port_transits, port_crossings, and map_link blob columns — so the
@@ -345,116 +344,130 @@ def ingest(db_path: Path, debug: bool = False) -> None:
     conn.execute("DELETE FROM ports")
     conn.execute("UPDATE map_links SET src_blob_id = NULL, dst_blob_id = NULL")
     conn.execute("DELETE FROM blobs")
-    conn.execute(
-        "DELETE FROM map_squares WHERE type = ?",
-        (MapSquareType.BLOB.value,),
-    )
+    conn.execute("DELETE FROM map_squares WHERE type = ?", (MapSquareType.BLOB.value,))
 
     next_blob_id = 1  # 0 reserved for blocked / no blob
-    blob_rows: list[tuple[int, int, int]] = []
+    blob_rows: list[tuple[int, int, int, int]] = []
+    square_inserts: list[tuple[int, int, int, str, bytes]] = []
+    plane_zero_grid = None
 
-    for world_name, y_op, y_threshold in [("overworld", "<", Y_WORLD_SPLIT), ("underworld", ">=", Y_WORLD_SPLIT)]:
-        rows = conn.execute(
-            f"SELECT id, name, x, y FROM locations "
-            f"WHERE x IS NOT NULL AND y IS NOT NULL AND y {y_op} ?",
-            (y_threshold,),
-        ).fetchall()
-        if len(rows) < 1:
-            print(f"{world_name}: no locations, skipping")
-            continue
-
-        loc_ids = [r[0] for r in rows]
-        points = np.array([(r[2], r[3]) for r in rows], dtype=np.float64)
-        print(f"{world_name}: {len(rows)} Voronoi cells")
-
-        py_all = np.arange(H, dtype=np.int32).reshape(-1, 1)
-        gy_all = y_max - 1 - py_all
-        if y_op == "<":
-            row_mask_1d = (gy_all < y_threshold).ravel()
+    for plane in planes:
+        print(f"\n=== plane {plane} ===")
+        collision, _ = MapSquare.stitch(
+            conn, x_min, x_max, y_min, y_max, plane=plane,
+            type=MapSquareType.COLLISION, region_padding=0,
+        )
+        if plane == 0:
+            water, _ = MapSquare.stitch(
+                conn, x_min, x_max, y_min, y_max,
+                type=MapSquareType.WATER, region_padding=0,
+            )
         else:
-            row_mask_1d = (gy_all >= y_threshold).ravel()
-        world_mask = np.broadcast_to(row_mask_1d[:, None], (H, W)).copy()
+            # Water is a plane-0 concept; a first floor has none.
+            water = np.zeros_like(collision)
 
-        print(f"{world_name}: computing Voronoi ownership...")
-        owners = compute_ownership(flags_grid, x_min, y_max, points, world_mask)
+        flags_grid = build_flags_grid(collision, water)
+        del collision, water
+        H, W = flags_grid.shape
+        blob_grid = np.zeros((H, W), dtype=np.uint16)
 
-        for cell_idx in range(len(rows)):
-            cell_mask_full = owners == cell_idx
-            if not cell_mask_full.any():
-                continue
-            ys, xs = np.nonzero(cell_mask_full)
-            bby_min, bby_max = int(ys.min()), int(ys.max()) + 1
-            bbx_min, bbx_max = int(xs.min()), int(xs.max()) + 1
-
-            flags_local = flags_grid[bby_min:bby_max, bbx_min:bbx_max]
-            cell_mask = cell_mask_full[bby_min:bby_max, bbx_min:bbx_max]
-
-            labels, n_blobs = cell_blobs(flags_local, cell_mask)
-            if n_blobs == 0:
+        for world_name, y_op, y_threshold in [
+            ("overworld", "<", Y_WORLD_SPLIT), ("underworld", ">=", Y_WORLD_SPLIT)
+        ]:
+            rows = conn.execute(
+                f"SELECT id, name, x, y FROM locations "
+                f"WHERE x IS NOT NULL AND y IS NOT NULL AND y {y_op} ?",
+                (y_threshold,),
+            ).fetchall()
+            if len(rows) < 1:
                 continue
 
-            global_ids = np.arange(next_blob_id, next_blob_id + n_blobs, dtype=np.uint16)
+            loc_ids = [r[0] for r in rows]
+            points = np.array([(r[2], r[3]) for r in rows], dtype=np.float64)
 
-            write_mask = labels > 0
-            blob_grid[bby_min:bby_max, bbx_min:bbx_max][write_mask] = global_ids[labels[write_mask] - 1]
+            py_all = np.arange(H, dtype=np.int32).reshape(-1, 1)
+            gy_all = y_max - 1 - py_all
+            if y_op == "<":
+                row_mask_1d = (gy_all < y_threshold).ravel()
+            else:
+                row_mask_1d = (gy_all >= y_threshold).ravel()
+            world_mask = np.broadcast_to(row_mask_1d[:, None], (H, W)).copy()
 
-            counts = np.bincount(labels[write_mask], minlength=n_blobs + 1)[1:]
-            for offset, cnt in enumerate(counts):
-                blob_rows.append((next_blob_id + offset, loc_ids[cell_idx], int(cnt)))
-            next_blob_id += n_blobs
+            owners = compute_ownership(flags_grid, x_min, y_max, points, world_mask)
 
-            if (cell_idx + 1) % 50 == 0:
-                print(f"  {world_name}: processed {cell_idx + 1}/{len(rows)} cells (global blob ids → {next_blob_id - 1})")
+            for cell_idx in range(len(rows)):
+                cell_mask_full = owners == cell_idx
+                if not cell_mask_full.any():
+                    continue
+                ys, xs = np.nonzero(cell_mask_full)
+                bby_min, bby_max = int(ys.min()), int(ys.max()) + 1
+                bbx_min, bbx_max = int(xs.min()), int(xs.max()) + 1
+
+                flags_local = flags_grid[bby_min:bby_max, bbx_min:bbx_max]
+                cell_mask = cell_mask_full[bby_min:bby_max, bbx_min:bbx_max]
+
+                labels, n_blobs = cell_blobs(flags_local, cell_mask)
+                if n_blobs == 0:
+                    continue
+
+                # Blob ids are written into a 16-bit PNG raster, so the global
+                # counter must stay under 65,535 across every plane. Failing
+                # loudly beats silently wrapping ids onto each other.
+                if next_blob_id + n_blobs > 65535:
+                    raise ValueError(
+                        f"Blob id {next_blob_id + n_blobs} exceeds the uint16 raster limit. "
+                        "Widen the blob map square encoding before adding more planes."
+                    )
+
+                global_ids = np.arange(next_blob_id, next_blob_id + n_blobs, dtype=np.uint16)
+
+                write_mask = labels > 0
+                blob_grid[bby_min:bby_max, bbx_min:bbx_max][write_mask] = global_ids[labels[write_mask] - 1]
+
+                counts = np.bincount(labels[write_mask], minlength=n_blobs + 1)[1:]
+                for offset, cnt in enumerate(counts):
+                    blob_rows.append((next_blob_id + offset, loc_ids[cell_idx], int(cnt), plane))
+                next_blob_id += n_blobs
+
+                if (cell_idx + 1) % 100 == 0:
+                    print(f"  {world_name}: {cell_idx + 1}/{len(rows)} cells (blob ids → {next_blob_id - 1})")
+
+        for ry in range(ry_min, ry_max + 1):
+            for rx in range(rx_min, rx_max + 1):
+                gx0, gy0 = rx * GAME_TILES_PER_REGION, ry * GAME_TILES_PER_REGION
+                px0, px1 = gx0 - x_min, gx0 + GAME_TILES_PER_REGION - x_min
+                py0 = y_max - (gy0 + GAME_TILES_PER_REGION)
+                py1 = y_max - gy0
+                if px0 < 0 or py0 < 0 or px1 > W or py1 > H:
+                    continue
+                tile = blob_grid[py0:py1, px0:px1]
+                if not tile.any():
+                    continue  # no walkable blobs here (all water/void/sky)
+                square_inserts.append((plane, rx, ry, MapSquareType.BLOB.value, encode_region_png(tile)))
+
+        plane_blobs = sum(1 for r in blob_rows if r[3] == plane)
+        print(f"plane {plane}: {plane_blobs} blobs")
+        if plane == 0:
+            plane_zero_grid = blob_grid
+        else:
+            del blob_grid
+        del flags_grid
 
     conn.executemany(
-        "INSERT INTO blobs (id, location_id, tile_count) VALUES (?, ?, ?)",
+        "INSERT INTO blobs (id, location_id, tile_count, plane) VALUES (?, ?, ?, ?)",
         blob_rows,
     )
-    print(f"Inserted {len(blob_rows)} blobs")
-
-    # Split blob_grid into 64x64 region tiles and write to map_squares
-    print("Writing blob map squares...")
-    row = conn.execute(
-        "SELECT MIN(region_x), MAX(region_x), MIN(region_y), MAX(region_y) "
-        "FROM map_squares WHERE plane = 0 AND type = 'collision'"
-    ).fetchone()
-    rx_min, rx_max, ry_min, ry_max = row
-
-    square_inserts: list[tuple[int, int, int, str, bytes]] = []
-    for ry in range(ry_min, ry_max + 1):
-        for rx in range(rx_min, rx_max + 1):
-            gx0 = rx * GAME_TILES_PER_REGION
-            gy0 = ry * GAME_TILES_PER_REGION
-            gx1 = gx0 + GAME_TILES_PER_REGION
-            gy1 = gy0 + GAME_TILES_PER_REGION
-
-            px0 = gx0 - x_min
-            px1 = gx1 - x_min
-            py0 = y_max - gy1  # top row of region in array coords
-            py1 = y_max - gy0
-
-            if px0 < 0 or py0 < 0 or px1 > W or py1 > H:
-                continue
-
-            tile = blob_grid[py0:py1, px0:px1]
-            if not tile.any():
-                continue  # skip regions with no walkable blobs (all water/void)
-
-            png = encode_region_png(tile)
-            square_inserts.append((0, rx, ry, MapSquareType.BLOB.value, png))
-
     conn.executemany(
-        "INSERT INTO map_squares (plane, region_x, region_y, type, image) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO map_squares (plane, region_x, region_y, type, image) VALUES (?, ?, ?, ?, ?)",
         square_inserts,
     )
-    print(f"Wrote {len(square_inserts)} blob map squares")
-
     conn.commit()
+    print(f"\nInserted {len(blob_rows)} blobs across {len(planes)} plane(s), "
+          f"{len(square_inserts)} blob map squares")
 
-    if debug:
+    if debug and plane_zero_grid is not None:
         render_debug_image(
-            conn, blob_grid, x_min, x_max, y_min, y_max,
+            conn, plane_zero_grid, x_min, x_max, y_min, y_max,
             Path("data/blobs_debug.png"),
         )
 

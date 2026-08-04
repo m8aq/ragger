@@ -139,19 +139,30 @@ def ingest(db_path: Path, edge_samples: int = DEFAULT_EDGE_SAMPLES) -> None:
     y_min = bbox[2] * GAME_TILES_PER_REGION
     y_max = (bbox[3] + 1) * GAME_TILES_PER_REGION
 
-    print("Loading blob map squares...")
-    blob_grid, extent = MapSquare.stitch_blobs(conn, x_min, x_max, y_min, y_max)
-    print(f"Blob grid: {blob_grid.shape[1]}x{blob_grid.shape[0]} tiles")
-
     # Dependent edges reference ports.id; wipe them first so the delete below
     # doesn't trip the foreign-key check.
     conn.execute("DELETE FROM port_transits")
     conn.execute("DELETE FROM port_crossings")
     conn.execute("DELETE FROM ports")
 
+    planes = [r[0] for r in conn.execute(
+        "SELECT DISTINCT plane FROM map_squares WHERE type = 'blob' ORDER BY plane"
+    )]
+    print(f"Blob map squares present for planes: {planes}")
+
     port_rows: list[tuple[int, int, int, int, int, int, int, int]] = []
 
-    for world_name, y_op, y_threshold in [("overworld", "<", Y_WORLD_SPLIT), ("underworld", ">=", Y_WORLD_SPLIT)]:
+    # Ports connect blobs, and blobs belong to exactly one plane, so each plane
+    # gets its own ridge sampling pass. Travel between planes is not a port —
+    # it is a map_link, which the pathfinder injects separately.
+    for plane in planes:
+      blob_grid, extent = MapSquare.stitch_blobs(conn, x_min, x_max, y_min, y_max, plane=plane)
+      if not blob_grid.any():
+          print(f"plane {plane}: no blobs, skipping")
+          continue
+      print(f"plane {plane}: blob grid {blob_grid.shape[1]}x{blob_grid.shape[0]}")
+
+      for world_name, y_op, y_threshold in [("overworld", "<", Y_WORLD_SPLIT), ("underworld", ">=", Y_WORLD_SPLIT)]:
         rows = conn.execute(
             f"SELECT id, x, y FROM locations "
             f"WHERE x IS NOT NULL AND y IS NOT NULL AND y {y_op} ?",

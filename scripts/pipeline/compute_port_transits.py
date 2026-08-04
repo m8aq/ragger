@@ -148,16 +148,35 @@ def ingest(db_path: Path) -> None:
     y_max = (bbox[3] + 1) * GAME_TILES_PER_REGION
 
     print("Loading collision + water layers...")
-    collision, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.COLLISION, region_padding=0)
-    water, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.WATER, region_padding=0)
-    flags_grid = build_flags_grid(collision, water)
-    del collision, water
+    # Ports belong to blobs and blobs to a plane, so the BFS must walk the
+    # collision of the plane its blob lives on. Layers are loaded per plane and
+    # selected by blob below.
+    blob_planes = dict(conn.execute("SELECT id, plane FROM blobs"))
+    planes = sorted(set(blob_planes.values())) or [0]
 
-    print("Loading blob grid...")
-    blob_grid, extent = MapSquare.stitch_blobs(conn, x_min, x_max, y_min, y_max)
+    flags_by_plane: dict[int, np.ndarray] = {}
+    blob_grid_by_plane: dict[int, np.ndarray] = {}
+    for _p in planes:
+        _collision, _ = MapSquare.stitch(
+            conn, x_min, x_max, y_min, y_max, plane=_p,
+            type=MapSquareType.COLLISION, region_padding=0)
+        if _p == 0:
+            _water, _ = MapSquare.stitch(
+                conn, x_min, x_max, y_min, y_max,
+                type=MapSquareType.WATER, region_padding=0)
+        else:
+            _water = np.zeros_like(_collision)
+        flags_by_plane[_p] = build_flags_grid(_collision, _water)
+        blob_grid_by_plane[_p], _ = MapSquare.stitch_blobs(
+            conn, x_min, x_max, y_min, y_max, plane=_p)
+        del _collision, _water
+
+    _, extent = MapSquare.stitch_blobs(conn, x_min, x_max, y_min, y_max, plane=planes[0])
     gx_min, _gx_max, _gy_min, gy_max = extent
-    H, W = blob_grid.shape
-    assert blob_grid.shape == flags_grid.shape, "blob and flags grids must align"
+    H, W = blob_grid_by_plane[planes[0]].shape
+    for _p in planes:
+        assert blob_grid_by_plane[_p].shape == flags_by_plane[_p].shape, \
+            f"blob and flags grids must align on plane {_p}"
 
     print("Loading ports...")
     port_rows = conn.execute(
@@ -180,6 +199,10 @@ def ingest(db_path: Path) -> None:
     eligible_blobs = [b for b, ps in ports_by_blob.items() if len(ps) >= 2]
     for i, blob_id in enumerate(eligible_blobs):
         ports = ports_by_blob[blob_id]
+
+        plane = blob_planes.get(blob_id, 0)
+        blob_grid = blob_grid_by_plane[plane]
+        flags_grid = flags_by_plane[plane]
 
         # Local crop covering all port reps and the full blob
         blob_mask_full = blob_grid == blob_id

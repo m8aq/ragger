@@ -85,17 +85,28 @@ def ingest(db_path: Path) -> None:
     y_min = bbox[2] * GAME_TILES_PER_REGION
     y_max = (bbox[3] + 1) * GAME_TILES_PER_REGION
 
-    print("Loading collision + water layers...")
-    collision, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.COLLISION, region_padding=0)
-    water, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.WATER, region_padding=0)
-    flags_grid = build_flags_grid(collision, water)
-    del collision, water
+    # A crossing joins two ports on the same ridge, which necessarily share a
+    # plane, so the reachability BFS runs on that plane's collision.
+    blob_planes = dict(conn.execute("SELECT id, plane FROM blobs"))
+    planes = sorted(set(blob_planes.values())) or [0]
+    print(f"Loading collision layers for planes {planes}...")
+
+    flags_by_plane: dict[int, np.ndarray] = {}
+    for _p in planes:
+        _collision, _ = MapSquare.stitch(
+            conn, x_min, x_max, y_min, y_max, plane=_p,
+            type=MapSquareType.COLLISION, region_padding=0)
+        _water = (MapSquare.stitch(conn, x_min, x_max, y_min, y_max,
+                                   type=MapSquareType.WATER, region_padding=0)[0]
+                  if _p == 0 else np.zeros_like(_collision))
+        flags_by_plane[_p] = build_flags_grid(_collision, _water)
+        del _collision, _water
 
     conn.execute("DELETE FROM port_crossings")
 
     pairs = conn.execute(
         """
-        SELECT pa.id, pa.rep_x, pa.rep_y, pb.id, pb.rep_x, pb.rep_y
+        SELECT pa.id, pa.rep_x, pa.rep_y, pb.id, pb.rep_x, pb.rep_y, pa.blob_id
         FROM ports pa
         JOIN ports pb ON
             pa.ridge_location_a_id = pb.ridge_location_a_id
@@ -109,7 +120,8 @@ def ingest(db_path: Path) -> None:
 
     rows: list[tuple[int, int, int]] = []
     dropped = 0
-    for a_id, ax, ay, b_id, bx, by in pairs:
+    for a_id, ax, ay, b_id, bx, by, a_blob in pairs:
+        flags_grid = flags_by_plane[blob_planes.get(a_blob, 0)]
         dist = _bfs_distance(flags_grid, ax, ay, bx, by, x_min, y_max)
         if dist is None:
             dropped += 1

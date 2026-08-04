@@ -37,11 +37,20 @@ BLOCK_SW = 0x800
 WATER_BLUE = (0, 102, 204)
 
 
-def load_layers(conn: sqlite3.Connection) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int, int, int]:
+def load_layers(
+    conn: sqlite3.Connection, plane: int = 0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int, int, int]:
     """Load stitched collision, water, and color layers covering every region.
 
     Returns (collision, water, color, x_min, x_max, y_min, y_max) where arrays
     are 1 px per tile (collision/water) or 4 px per tile (color).
+
+    The bounding box always comes from plane 0 so every plane shares one
+    coordinate frame — upper planes cover only building interiors, and letting
+    each derive its own extent would shift array indices between planes.
+
+    Water and colour exist for plane 0 only; upper planes fall back to empty
+    layers of the right shape. Water matters underfoot, not on a first floor.
     """
     row = conn.execute(
         "SELECT MIN(region_x), MAX(region_x), MIN(region_y), MAX(region_y) "
@@ -55,9 +64,19 @@ def load_layers(conn: sqlite3.Connection) -> tuple[np.ndarray, np.ndarray, np.nd
     y_min = row[2] * GAME_TILES_PER_REGION
     y_max = (row[3] + 1) * GAME_TILES_PER_REGION
 
-    collision, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.COLLISION, region_padding=0)
-    water, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.WATER, region_padding=0)
-    color, _ = MapSquare.stitch(conn, x_min, x_max, y_min, y_max, type=MapSquareType.COLOR, region_padding=0)
+    collision, _ = MapSquare.stitch(
+        conn, x_min, x_max, y_min, y_max, plane=plane,
+        type=MapSquareType.COLLISION, region_padding=0,
+    )
+
+    if plane == 0:
+        water, _ = MapSquare.stitch(
+            conn, x_min, x_max, y_min, y_max, type=MapSquareType.WATER, region_padding=0)
+        color, _ = MapSquare.stitch(
+            conn, x_min, x_max, y_min, y_max, type=MapSquareType.COLOR, region_padding=0)
+    else:
+        water = np.zeros_like(collision)
+        color = np.zeros((collision.shape[0] * 4, collision.shape[1] * 4, 3), dtype=np.uint8)
 
     return collision, water, color, x_min, x_max, y_min, y_max
 

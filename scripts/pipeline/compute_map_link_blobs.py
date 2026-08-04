@@ -73,13 +73,21 @@ def ingest(db_path: Path, max_radius: int = DEFAULT_MAX_RADIUS) -> None:
     y_min = bbox[2] * GAME_TILES_PER_REGION
     y_max = (bbox[3] + 1) * GAME_TILES_PER_REGION
 
-    print("Loading blob grid...")
-    blob_grid, _ = MapSquare.stitch_blobs(conn, x_min, x_max, y_min, y_max)
+    # A link's two ends can sit on different floors — a staircase is exactly
+    # that — so each endpoint is resolved against its own plane's blob raster.
+    planes = [r[0] for r in conn.execute(
+        "SELECT DISTINCT plane FROM map_squares WHERE type = 'blob' ORDER BY plane"
+    )]
+    print(f"Loading blob grids for planes {planes}...")
+    grids = {
+        p: MapSquare.stitch_blobs(conn, x_min, x_max, y_min, y_max, plane=p)[0]
+        for p in planes
+    }
 
     conn.execute("UPDATE map_links SET src_blob_id = NULL, dst_blob_id = NULL")
 
     rows = conn.execute(
-        "SELECT id, src_x, src_y, dst_x, dst_y FROM map_links "
+        "SELECT id, src_x, src_y, dst_x, dst_y, src_plane, dst_plane FROM map_links "
         "WHERE src_x IS NOT NULL AND src_y IS NOT NULL "
         "AND dst_x IS NOT NULL AND dst_y IS NOT NULL"
     ).fetchall()
@@ -88,9 +96,11 @@ def ingest(db_path: Path, max_radius: int = DEFAULT_MAX_RADIUS) -> None:
     updates: list[tuple[int | None, int | None, int]] = []
     src_hits = 0
     dst_hits = 0
-    for lid, sx, sy, dx, dy in rows:
-        sbid = resolve_blob(blob_grid, x_min, y_max, sx, sy, max_radius)
-        dbid = resolve_blob(blob_grid, x_min, y_max, dx, dy, max_radius)
+    for lid, sx, sy, dx, dy, sp, dp in rows:
+        src_grid = grids.get(sp)
+        dst_grid = grids.get(dp)
+        sbid = resolve_blob(src_grid, x_min, y_max, sx, sy, max_radius) if src_grid is not None else None
+        dbid = resolve_blob(dst_grid, x_min, y_max, dx, dy, max_radius) if dst_grid is not None else None
         if sbid is not None:
             src_hits += 1
         if dbid is not None:

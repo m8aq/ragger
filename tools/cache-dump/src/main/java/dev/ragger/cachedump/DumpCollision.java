@@ -174,7 +174,17 @@ public class DumpCollision {
         BufferedImage img = new BufferedImage(REGION_SIZE, REGION_SIZE, BufferedImage.TYPE_INT_ARGB);
         for (int x = 0; x < REGION_SIZE; x++) {
             for (int y = 0; y < REGION_SIZE; y++) {
-                int packed = DATA_PRESENT | flags[x][y];
+                // DATA_PRESENT means "this tile exists as floor". On plane 0 the
+                // world is floored nearly everywhere and the flag has always been
+                // set unconditionally, so leave that path exactly as it was rather
+                // than risk regressing a verified build.
+                //
+                // Upper planes are mostly open sky: a tile only exists where a
+                // building floor was drawn. Without this check every empty tile
+                // above ground decodes as walkable, and a flood fill would happily
+                // route a player through thin air.
+                boolean present = plane == 0 || hasFloor(region, plane, x, y);
+                int packed = (present ? DATA_PRESENT : 0) | flags[x][y];
                 int blue = packed & 0xFF;
                 int green = (packed >> 8) & 0xFF;
                 img.setRGB(x, REGION_SIZE - 1 - y, 0xFF000000 | (green << 8) | blue);
@@ -183,6 +193,17 @@ public class DumpCollision {
 
         String filename = plane + "_" + region.getRegionX() + "_" + region.getRegionY() + ".png";
         ImageIO.write(img, "PNG", outputDir.resolve(filename).toFile());
+    }
+
+    /**
+     * True if the given plane has actual floor at this tile.
+     *
+     * A tile is floored if it has an underlay (terrain texture) or an overlay
+     * (path, water edge, building floor). Tiles with neither are empty space —
+     * on an upper plane that is open air above the ground below.
+     */
+    private static boolean hasFloor(Region region, int plane, int x, int y) {
+        return region.getUnderlayId(plane, x, y) != 0 || region.getOverlayId(plane, x, y) != 0;
     }
 
     /**

@@ -378,7 +378,10 @@ SCHEMAS: list[str] = [
         name TEXT NOT NULL,
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
-        UNIQUE(game_id, x, y)
+        plane INTEGER NOT NULL DEFAULT 0,
+        source TEXT NOT NULL DEFAULT 'wiki',
+        combat_level INTEGER,
+        UNIQUE(game_id, x, y, plane)
     )
     """,
     """
@@ -397,6 +400,7 @@ SCHEMAS: list[str] = [
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         location_id INTEGER NOT NULL,
         tile_count INTEGER NOT NULL,
+        plane INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (location_id) REFERENCES locations(id)
     )
     """,
@@ -455,7 +459,9 @@ SCHEMAS: list[str] = [
         type TEXT,
         description TEXT,
         src_blob_id INTEGER REFERENCES blobs(id),
-        dst_blob_id INTEGER REFERENCES blobs(id)
+        dst_blob_id INTEGER REFERENCES blobs(id),
+        src_plane INTEGER NOT NULL DEFAULT 0,
+        dst_plane INTEGER NOT NULL DEFAULT 0
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_map_links_src_blob ON map_links(src_blob_id)",
@@ -511,6 +517,8 @@ SCHEMAS: list[str] = [
         x INTEGER,
         y INTEGER,
         region INTEGER,
+        plane INTEGER NOT NULL DEFAULT 0,
+        plane_source TEXT,
         FOREIGN KEY (monster_id) REFERENCES monsters(id)
     )
     """,
@@ -540,7 +548,9 @@ SCHEMAS: list[str] = [
         x INTEGER NOT NULL,
         y INTEGER NOT NULL,
         name TEXT,
-        region INTEGER
+        region INTEGER,
+        plane INTEGER NOT NULL DEFAULT 0,
+        plane_source TEXT
     )
     """,
     f"""
@@ -971,7 +981,9 @@ SCHEMAS: list[str] = [
         COALESCE(dst_x, -1),
         COALESCE(dst_y, -1),
         COALESCE(type, ''),
-        COALESCE(description, '')
+        COALESCE(description, ''),
+        src_plane,
+        dst_plane
     )
     """,
     """
