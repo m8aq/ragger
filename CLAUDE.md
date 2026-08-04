@@ -26,6 +26,25 @@ Runs all ingestion scripts in the correct order. Items must be populated first s
 uv run python scripts/fetch_all.py [--db data/ragger.db] [--league DEMONIC_PACTS|RAGING_ECHOES]
 ```
 
+#### Tracking a run
+
+Each step is logged with its position, how long it took, and time elapsed so far:
+
+```
+=== [12/42] scripts/pipeline/fetch_monsters.py  (elapsed 18m 40s  eta ~41m 12s) ===
+--- [12/42] fetch_monsters done in 2m 07s
+```
+
+The estimate comes from `data/build-timings.json`, written after each successful run — so the first build shows no estimate rather than a made-up one, and later builds get more accurate.
+
+`data/build-progress.json` is rewritten after every step, so a background run can be checked without reading the log:
+
+```sh
+cat data/build-progress.json
+```
+
+It holds `state` (`running`, `failed` or `complete`), the current step number and name, seconds elapsed, and per-step durations for everything finished so far. On failure the file records exactly which step stopped the run. A completed build also prints its slowest steps with their share of total runtime.
+
 ### Pipeline scripts (`scripts/pipeline/`)
 
 Pipeline order (managed by `fetch_all.py`):
@@ -39,21 +58,22 @@ Pipeline order (managed by `fetch_all.py`):
 7. `fetch_diary_tasks.py` — Pulls diary tasks with skill and quest requirements
 8. `fetch_diary_items.py` — Pulls diary task item requirements from Achievement Diary page
 9. `fetch_shops.py` — Pulls shop data with items, stock, pricing, and shop type from Category:Shops
-11. `fetch_locations.py` — Pulls locations with adjacency graph, region, and map coordinates from Category:Locations
-12. `fetch_facilities.py` — Pulls facility coordinates (banks, furnaces, anvils, altars, spinning wheels, looms)
-13. `fetch_monsters.py` — Pulls monsters with full stat blocks, spawn locations, and drop tables from Category:Monsters (batched)
-14. `fetch_dungeon_entrances.py` — Extracts surface-to-underground entrance/exit map links from location pages
-15. `fetch_fairy_rings.py` — Parses fairy ring codes and coordinates, creates links between all 55 codes
-16. `fetch_quetzal.py` — Parses Quetzal Transport System stops and creates links between all stops
-17. `fetch_charter_ships.py` — Parses charter ship dock coordinates from Trader Stan's Trading Post
-18. `fetch_magic_teleports.py` — Parses all spellbook teleports (Standard, Ancient, Lunar) and item teleports (jewellery, etc.)
-19. `fetch_activities.py` — Pulls activities/minigames with type, coordinates, skills bitmask, and region from Category:Activities
-20. `fetch_npcs.py` — Pulls non-combat NPC data (name, version, location, options, region) from Category:Non-player characters
-21. `fetch_spells.py` — Fetches all spells from Category:Spells, parses {{Infobox Spell}} and {{RuneReq}}. Inserts into `combat_spells` (element, max_damage), `utility_spells`, or `teleport_spells` (destination coordinates, lectern) based on type. Rune costs resolved to item IDs in `*_spell_runes` tables.
-22. `fetch_ground_items.py` — Pulls ground item spawns by finding pages using {{ItemSpawnLine}} template. Parses item name, location, members, coordinates, and league region. One row per spawn coordinate.
-23. `fetch_npc_locations.py` — Associates NPC game IDs with wiki-stated coordinates by parsing versioned id and map fields from Infobox NPC
-24. `fetch_actions.py` — Universal action ingestion from {{Skill table}} templates. One API call per skill expands the table and parses name, level, XP, materials, tools, facilities, and secondary skills. Entity/facility pages are batch-fetched for Infobox NPC/Scenery game IDs, with ops resolved from cache dump definitions. Replaces all individual fetch_*_actions.py scripts and trigger linking scripts. Supports `--skill` to run a single skill.
-25. `fetch_wiki_vars.py` — Scrapes RuneScape:Varplayer/* and RuneScape:Varbit/* wiki pages for descriptions, content links, var class, and value annotations (quest stages, etc.)
+10. `fetch_locations.py` — Pulls locations with adjacency graph, region, and map coordinates from Category:Locations. Infobox names are not unique (four temples all declare `name = Temple`), so a `version` disambiguator is derived from the page title and uniqueness is on `(name, version)` — matching `monsters` and `npcs`.
+11. `fetch_facilities.py` — Pulls facility coordinates (banks, furnaces, anvils, altars, spinning wheels, looms)
+12. `fetch_monsters.py` — Pulls monsters with full stat blocks, spawn locations, and drop tables from Category:Monsters (batched)
+13. `fetch_dungeon_entrances.py` — Extracts surface-to-underground entrance/exit map links from location pages
+14. `fetch_fairy_rings.py` — Parses fairy ring codes and coordinates, creates links between all 55 codes
+15. `fetch_quetzal.py` — Parses Quetzal Transport System stops and creates links between all stops
+16. `fetch_charter_ships.py` — Parses charter ship dock coordinates from Trader Stan's Trading Post
+17. `fetch_magic_teleports.py` — Parses all spellbook teleports (Standard, Ancient, Lunar) and item teleports (jewellery, etc.)
+18. `fetch_activities.py` — Pulls activities/minigames with type, coordinates, skills bitmask, and region from Category:Activities
+19. `fetch_npcs.py` — Pulls non-combat NPC data (name, version, location, options, region) from Category:Non-player characters
+20. `fetch_spells.py` — Fetches all spells from Category:Spells, parses {{Infobox Spell}} and {{RuneReq}}. Inserts into `combat_spells` (element, max_damage), `utility_spells`, or `teleport_spells` (destination coordinates, lectern) based on type. Rune costs resolved to item IDs in `*_spell_runes` tables.
+21. `fetch_ground_items.py` — Pulls ground item spawns by finding pages using {{ItemSpawnLine}} template. Parses item name, location, members, coordinates, and league region. One row per spawn coordinate.
+22. `fetch_npc_locations.py` — Associates NPC game IDs with wiki-stated coordinates by parsing versioned id and map fields from Infobox NPC
+23. `fetch_actions.py` — Universal action ingestion from {{Skill table}} templates. One API call per skill expands the table and parses name, level, XP, materials, tools, facilities, and secondary skills. Entity/facility pages are batch-fetched for Infobox NPC/Scenery game IDs, with ops resolved from cache dump definitions. Replaces all individual fetch_*_actions.py scripts and trigger linking scripts. Supports `--skill` to run a single skill.
+24. `fetch_wiki_vars.py` — Scrapes RuneScape:Varplayer/* and RuneScape:Varbit/* wiki pages for descriptions, content links, var class, and value annotations (quest stages, etc.)
+25. `fetch_mechanics.py` — Stores game mechanics reference pages (Attack speed, Drop rate, Damage per second/*, Dragonfire, ...) whole in `wiki_pages`. These pages carry no infobox and share no structure, so there is nothing to parse into typed columns — each page is kept as raw wikitext plus a markup-stripped `text` rendering for retrieval. Defaults to `Category:Mechanics`; `--category` accepts any other category of reference prose (Calculators, Money making guides), recorded in `wiki_pages.source`.
 26. `fetch_dialogues.py` — Pulls dialogue trees from Transcript: pages (namespace 120). Parses *-indented wikitext with {{topt}}, {{tcond}}, {{tact}}, {{tbox}}, {{tselect}}, {{qact}} templates into a tree in dialogue_pages + dialogue_nodes. Resolves `-> above`/`-> below`/`-> other` action references into `dialogue_nodes.continue_target_id`.
 27. `fetch_page_categories.py` — Batch-fetches wiki categories for all entity pages (items, quests, monsters, NPCs, locations, equipment, activities, shops, spells) via prop=categories (50 pages/request). Links page titles to `wiki_categories` rows in `page_categories`.
 28. `link_shop_locations.py` — Links shops to locations by matching location text
@@ -74,8 +94,33 @@ Pipeline order (managed by `fetch_all.py`):
 ### Import scripts (`scripts/import/`)
 
 - `import_map_squares.py` — Imports map square images from `data/map-squares.zip` into the `map_squares` table. One-time setup.
-- `import_game_vars.py` — Imports game var JSON from `data/game-vars/` (produced by `dumpGameVariables`) into the `game_vars` table. Re-run after updating RuneLite.
+- `import_game_vars.py` — Imports game var JSON from `data/game-vars/` (produced by `dumpGameVars`) into the `game_vars` table. Re-run after updating RuneLite.
 - `import_object_locations.py` — Imports interactive object spawn locations from `data/cache-dump/object-locations.json` (produced by `dumpObjectLocations`) into the `object_locations` table.
+
+### smoke_test.py — validate every step before a full build
+
+A full build takes about an hour and `fetch_all.py` stops at the first failing script, so a mistake in step 30 only surfaces after 45 minutes of fetching. `smoke_test.py` runs every step with the page lists capped and **keeps going after a failure**, so one run surfaces every broken step.
+
+```sh
+uv run python scripts/smoke_test.py [--pages 15] [--db data/smoke.db] [--from-step fetch_npcs]
+```
+
+Roughly 3.5 minutes for all 46 steps. Run it after touching any pipeline script.
+
+It works through two environment variables, which are also usable directly:
+
+| Variable | Effect |
+|---|---|
+| `RAGGER_MAX_PAGES=N` | Caps `fetch_category_members`, `fetch_template_users` and `enumerate_var_pages` to N pages. Every large step draws its work list from one of these; steps driven by upstream tables shrink automatically because their inputs do. |
+| `RAGGER_SKIP_ATTRIBUTION=1` | Skips contributor and redirect lookups — pure network calls with no parsing to exercise. |
+
+This is **not** a correctness check. With 15 pages per category most cross-references will not resolve, so low or zero row counts are expected. What it proves is that every script runs, parses, and writes without raising.
+
+**A real build always fetches everything.** Both variables default to off, and `fetch_all.py` refuses to start if either is set — otherwise a stray environment variable would silently produce a truncated database while every step reported success. Use `smoke_test.py` for sampling; `fetch_all.py` is all-or-nothing.
+
+`--from-step` resumes partway through and implies `--keep`, since the skipped steps are exactly the ones that populate the tables the later steps read. The three cache-import scripts always run regardless, because they take about two seconds and skipping them makes every compute step fail for reasons unrelated to the code under test.
+
+Steps listed in `CAP_SENSITIVE` are reported as `skip` rather than `FAIL` because they look up specific hardcoded entities that a small sample will not contain — `fetch_npc_transports` needs the NPCs that operate transports to be among the fetched `npc_locations` rows. Steps in `STEP_ARGS` get extra narrowing flags (`fetch_actions` runs a single skill).
 
 ### Utility scripts
 
@@ -101,7 +146,7 @@ Requires JDK 21+. Run from `tools/cache-dump/`:
 ./gradlew dumpMapTiles [--args="--objects --icons --no-walls"]
 
 # Dump game variable constants (varps, varbits, varcs) to JSON
-./gradlew dumpGameVariables [--args="--output ../../data/game-vars"]
+./gradlew dumpGameVars [--args="--output ../../data/game-vars"]
 
 # Dump NPC definitions (id, name, size, combatLevel, ops, conditionalOps) to JSON
 ./gradlew dumpNpcDefinitions [--args="--output ../../data/cache-dump/npc-definitions.json"]
@@ -155,12 +200,23 @@ All scripts that fetch wiki data **must** record attributions. Use `record_attri
 - User-Agent includes project URL per wiki API policy
 - Wikitext must be fetched one page at a time (`action=parse`), but contributor lookups support batching (`action=query`)
 - Wiki page cache: set `RAGGER_WIKI_CACHE=data/wiki-cache.db` to cache wikitext in a separate SQLite database. Cache entries within the TTL (default 24 hours, override with `RAGGER_WIKI_TTL` in seconds) are trusted without revid checks. Stale entries are re-validated via a cheap revid-only API call. Run `scripts/validate_wiki_cache.py` to bulk-validate all cached revids and reset their TTL. `WikiCache` class can also be passed directly to fetch functions via the `cache` parameter.
+- Incremental sync (designed, not yet implemented): `docs/INCREMENTAL_SYNC.md` describes how to cut warm rebuilds from ~60 to ~15 minutes by syncing the cache from the wiki's recentchanges feed and caching contributor/redirect lookups, instead of re-fetching everything per build.
 
 ## Database
 
 Default path: `data/ragger.db`. All scripts accept `--db` to override.
 
 Tables are created automatically when any script runs. Only `fetch_items.py` writes to the items table — all other scripts reference it.
+
+### Uniqueness and re-runs
+
+Most fetch scripts insert with `INSERT OR IGNORE`, which only skips a row when it would violate a uniqueness constraint. A table without such a constraint silently accumulates duplicates on every re-run, so any table whose rows are fully described by their own columns should declare one.
+
+Where a key column is nullable, uniqueness must be an expression index over `COALESCE` sentinels rather than a plain `UNIQUE (...)` — SQLite treats NULLs as distinct, so two rows differing only by a NULL would not collide. `map_links`, `facilities`, `monster_drops` and `action_triggers` use this form; `diary_tasks` has no nullable key columns and uses a plain constraint.
+
+`actions` deliberately has no uniqueness constraint. Several actions share a name, members flag and tick count while differing only in their `action_input_items` rows (24 distinct recipes all produce "Fish offcuts"), so the parent row is not a key.
+
+There is no migration system. `create_tables` uses `CREATE TABLE IF NOT EXISTS`, so it will not add columns or constraints to an existing database — and creating a unique index over data that already contains duplicates fails outright. Schema changes require rebuilding from scratch.
 
 ## Lua Actor API
 
@@ -200,6 +256,7 @@ All API methods accept a `sqlite3.Connection` so connections can be reused. Per-
 - `MONSTER.md` — Monster stats, locations, drops, immunities
 - `GAME_VARIABLE.md` — GameVariable with content/functional tags, values
 - `WIKI.md` — Wiki fetch, parse, cache, attribution utilities
+- `WIKI_PAGE.md` — WikiPage: whole reference pages (mechanics, guides) stored as prose, with title and full-text search
 - `ENUMS.md` — All enums (Skill, Region, EquipmentSlot, MapLinkType, etc.)
 
 ## RuneLite Plugin
