@@ -230,7 +230,7 @@ Event hooks fire after `on_tick` on game tick frames, delivering buffered game e
 
 **Combat & damage:**
 - `on_hitsplat(data)` — `{amount, type, is_mine, target_type, target_name, target_id?}`
-- `on_projectile(data)` — `{id, src_x, src_y, dst_x, dst_y, start_cycle, end_cycle, remaining_cycles, target_type?, target_name?, target_id?}`
+- `on_projectile(data)` — `{id, src_x, src_y, dst_x, dst_y, start_cycle, end_cycle, remaining_cycles, target_type?, target_name?, target_id?}` — `src_x`/`src_y` are world tile coordinates; `dst_x`/`dst_y` are local scene units
 - `on_death(data)` — `{type, name, id?}` — NPC or player death observed
 
 **Chat:**

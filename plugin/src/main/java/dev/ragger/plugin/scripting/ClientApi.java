@@ -28,7 +28,7 @@ public class ClientApi {
 
     // World info
     public int world() { return client.getWorld(); }
-    public int plane() { return client.getPlane(); }
+    public int plane() { return client.getTopLevelWorldView().getPlane(); }
     public int tick_count() { return client.getTickCount(); }
     public int fps() { return client.getFPS(); }
 

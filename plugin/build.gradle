@@ -17,7 +17,7 @@ repositories {
     maven { url = 'https://jitpack.io' }
 }
 
-def runeLiteVersion = '1.12.24-SNAPSHOT'
+def runeLiteVersion = '1.12.34.1'
 
 dependencies {
     compileOnly "net.runelite:client:${runeLiteVersion}"
@@ -41,4 +41,8 @@ tasks.register('run', JavaExec) {
     mainClass = 'dev.ragger.plugin.RaggerPluginTest'
     jvmArgs = ['-ea', '--add-exports', 'java.desktop/com.apple.eawt=ALL-UNNAMED']
     environment System.getenv()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << '-Xlint:deprecation'
 }

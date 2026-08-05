@@ -9,9 +9,9 @@ import dev.ragger.plugin.scripting.LuaEvent;
 import dev.ragger.plugin.scripting.MinimapOverlay;
 import dev.ragger.plugin.scripting.ActorTemplateLoader;
 import dev.ragger.plugin.scripting.ServiceManager;
+import net.runelite.api.ActorSpotAnim;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.events.ActorDeath;
@@ -37,6 +37,7 @@ import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.config.ConfigManager;
@@ -292,7 +293,7 @@ public class RaggerPlugin extends Plugin {
      * Diff the inventory against the previous snapshot and buffer change events.
      */
     private void diffInventory() {
-        final ItemContainer inv = client.getItemContainer(InventoryID.INVENTORY);
+        final ItemContainer inv = client.getItemContainer(InventoryID.INV);
         if (inv == null) {
             return;
         }
@@ -385,7 +386,10 @@ public class RaggerPlugin extends Plugin {
     @Subscribe
     public void onGraphicChanged(final GraphicChanged event) {
         final var actor = event.getActor();
-        actorManager.bufferEvent(LuaEvent.fromGraphic(actor, actor.getGraphic()));
+
+        for (final ActorSpotAnim spotAnim : actor.getSpotAnims()) {
+            actorManager.bufferEvent(LuaEvent.fromGraphic(actor, spotAnim.getId()));
+        }
     }
 
     @Subscribe

@@ -3,6 +3,7 @@ package dev.ragger.plugin.scripting;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
 import net.runelite.api.Point;
+import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
 import party.iroiro.luajava.Lua;
@@ -57,13 +58,13 @@ public class CoordsApi {
         final int worldX = (int) lua.toInteger(2);
         final int worldY = (int) lua.toInteger(3);
 
-        final LocalPoint lp = LocalPoint.fromWorld(client, worldX, worldY);
+        final LocalPoint lp = LocalPoint.fromWorld(worldView(), worldX, worldY);
         if (lp == null) {
             lua.pushNil();
             return 1;
         }
 
-        final Point canvas = Perspective.localToCanvas(client, lp, client.getPlane());
+        final Point canvas = Perspective.localToCanvas(client, lp, worldView().getPlane());
         if (canvas == null) {
             lua.pushNil();
             return 1;
@@ -81,8 +82,8 @@ public class CoordsApi {
         final int tileX = (int) lua.toInteger(2);
         final int tileY = (int) lua.toInteger(3);
 
-        final LocalPoint lp = LocalPoint.fromScene(tileX, tileY);
-        final Point canvas = Perspective.localToCanvas(client, lp, client.getPlane());
+        final LocalPoint lp = LocalPoint.fromScene(tileX, tileY, worldView());
+        final Point canvas = Perspective.localToCanvas(client, lp, worldView().getPlane());
         if (canvas == null) {
             lua.pushNil();
             return 1;
@@ -100,7 +101,7 @@ public class CoordsApi {
         final int worldX = (int) lua.toInteger(2);
         final int worldY = (int) lua.toInteger(3);
 
-        final LocalPoint lp = LocalPoint.fromWorld(client, worldX, worldY);
+        final LocalPoint lp = LocalPoint.fromWorld(worldView(), worldX, worldY);
         if (lp == null) {
             lua.pushNil();
             return 1;
@@ -118,7 +119,7 @@ public class CoordsApi {
         final int worldX = (int) lua.toInteger(2);
         final int worldY = (int) lua.toInteger(3);
 
-        final LocalPoint lp = LocalPoint.fromWorld(client, worldX, worldY);
+        final LocalPoint lp = LocalPoint.fromWorld(worldView(), worldX, worldY);
         if (lp == null) {
             lua.pushNil();
             return 1;
@@ -144,13 +145,13 @@ public class CoordsApi {
         final int worldY = (int) lua.toInteger(3);
         final int height = lua.getTop() >= 4 ? (int) lua.toInteger(4) : 0;
 
-        final LocalPoint lp = LocalPoint.fromWorld(client, worldX, worldY);
+        final LocalPoint lp = LocalPoint.fromWorld(worldView(), worldX, worldY);
         if (lp == null) {
             lua.pushNil();
             return 1;
         }
 
-        final Point canvas = Perspective.localToCanvas(client, lp, client.getPlane(), height);
+        final Point canvas = Perspective.localToCanvas(client, lp, worldView().getPlane(), height);
         if (canvas == null) {
             lua.pushNil();
             return 1;
@@ -168,7 +169,7 @@ public class CoordsApi {
         final int worldX = (int) lua.toInteger(2);
         final int worldY = (int) lua.toInteger(3);
 
-        final LocalPoint lp = LocalPoint.fromWorld(client, worldX, worldY);
+        final LocalPoint lp = LocalPoint.fromWorld(worldView(), worldX, worldY);
         if (lp == null) {
             lua.pushNil();
             return 1;
@@ -191,5 +192,9 @@ public class CoordsApi {
         }
 
         return 1;
+    }
+
+    private WorldView worldView() {
+        return client.getTopLevelWorldView();
     }
 }

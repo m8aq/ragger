@@ -81,7 +81,7 @@ public class CombatApi {
             return 1;
         }
 
-        lua.push(client.isPrayerActive((Prayer) obj));
+        lua.push(isActive((Prayer) obj));
         return 1;
     }
 
@@ -93,7 +93,7 @@ public class CombatApi {
         int index = 1;
 
         for (final Prayer prayer : Prayer.values()) {
-            if (client.isPrayerActive(prayer)) {
+            if (isActive(prayer)) {
                 lua.pushJavaObject(prayer);
                 lua.rawSetI(-2, index++);
             }
@@ -144,5 +144,10 @@ public class CombatApi {
         lua.setField(-2, "animation");
 
         return 1;
+    }
+
+    /** Each prayer's on/off state lives in its own varbit; Client.isPrayerActive is deprecated. */
+    private boolean isActive(final Prayer prayer) {
+        return client.getVarbitValue(prayer.getVarbit()) == 1;
     }
 }

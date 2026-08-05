@@ -3,6 +3,7 @@ package dev.ragger.plugin.scripting;
 import net.runelite.api.Client;
 import net.runelite.api.CollisionData;
 import net.runelite.api.CollisionDataFlag;
+import net.runelite.api.WorldView;
 import party.iroiro.luajava.Lua;
 
 import java.util.ArrayList;
@@ -87,16 +88,16 @@ public class PathfindingApi {
         final int worldX = (int) lua.toInteger(2);
         final int worldY = (int) lua.toInteger(3);
 
-        final CollisionData[] collisionData = client.getCollisionMaps();
+        final CollisionData[] collisionData = worldView().getCollisionMaps();
         if (collisionData == null) {
             lua.pushNil();
             return 1;
         }
 
-        final int plane = client.getPlane();
+        final int plane = worldView().getPlane();
         final int[][] flags = collisionData[plane].getFlags();
-        final int sx = worldX - client.getBaseX();
-        final int sy = worldY - client.getBaseY();
+        final int sx = worldX - worldView().getBaseX();
+        final int sy = worldY - worldView().getBaseY();
 
         if (!inBounds(sx, sy)) {
             lua.pushNil();
@@ -191,15 +192,15 @@ public class PathfindingApi {
      * to the target (Chebyshev distance). Uses the same movement rules as A*.
      */
     private int[] floodFillClosest(final int fromWorldX, final int fromWorldY, final int toWorldX, final int toWorldY) {
-        final CollisionData[] collisionData = client.getCollisionMaps();
+        final CollisionData[] collisionData = worldView().getCollisionMaps();
         if (collisionData == null) {
             return null;
         }
 
-        final int plane = client.getPlane();
+        final int plane = worldView().getPlane();
         final int[][] flags = collisionData[plane].getFlags();
-        final int baseX = client.getBaseX();
-        final int baseY = client.getBaseY();
+        final int baseX = worldView().getBaseX();
+        final int baseY = worldView().getBaseY();
 
         final int sx = fromWorldX - baseX;
         final int sy = fromWorldY - baseY;
@@ -293,15 +294,15 @@ public class PathfindingApi {
      * Coordinates are world tile coords. Returns path as world coords, or null if unreachable.
      */
     private List<int[]> astar(final int fromWorldX, final int fromWorldY, final int toWorldX, final int toWorldY) {
-        final CollisionData[] collisionData = client.getCollisionMaps();
+        final CollisionData[] collisionData = worldView().getCollisionMaps();
         if (collisionData == null) {
             return null;
         }
 
-        final int plane = client.getPlane();
+        final int plane = worldView().getPlane();
         final int[][] flags = collisionData[plane].getFlags();
-        final int baseX = client.getBaseX();
-        final int baseY = client.getBaseY();
+        final int baseX = worldView().getBaseX();
+        final int baseY = worldView().getBaseY();
 
         final int sx = fromWorldX - baseX;
         final int sy = fromWorldY - baseY;
@@ -423,12 +424,12 @@ public class PathfindingApi {
      * Straighten a path using current collision data.
      */
     private List<int[]> straighten(final List<int[]> path) {
-        final CollisionData[] collisionData = client.getCollisionMaps();
+        final CollisionData[] collisionData = worldView().getCollisionMaps();
         if (collisionData == null) {
             return path;
         }
-        final int[][] flags = collisionData[client.getPlane()].getFlags();
-        return straightenPath(path, flags, client.getBaseX(), client.getBaseY());
+        final int[][] flags = collisionData[worldView().getPlane()].getFlags();
+        return straightenPath(path, flags, worldView().getBaseX(), worldView().getBaseY());
     }
 
     /**
@@ -553,5 +554,9 @@ public class PathfindingApi {
 
     private static int unpackY(final long key) {
         return (int) (key & 0xFFFF);
+    }
+
+    private WorldView worldView() {
+        return client.getTopLevelWorldView();
     }
 }

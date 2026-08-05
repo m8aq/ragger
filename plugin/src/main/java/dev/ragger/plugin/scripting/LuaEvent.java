@@ -116,16 +116,18 @@ public class LuaEvent {
         final Map<String, Object> data = new HashMap<>();
         final Projectile proj = event.getProjectile();
 
+        final WorldPoint source = proj.getSourcePoint();
+
         data.put("id", proj.getId());
-        data.put("src_x", (int) proj.getX1());
-        data.put("src_y", (int) proj.getY1());
+        data.put("src_x", source == null ? 0 : source.getX());
+        data.put("src_y", source == null ? 0 : source.getY());
         data.put("dst_x", event.getPosition().getX());
         data.put("dst_y", event.getPosition().getY());
         data.put("start_cycle", proj.getStartCycle());
         data.put("end_cycle", proj.getEndCycle());
         data.put("remaining_cycles", proj.getRemainingCycles());
 
-        final Actor target = proj.getInteracting();
+        final Actor target = proj.getTargetActor();
         if (target instanceof NPC npc) {
             data.put("target_type", "npc");
             data.put("target_name", npc.getName());

@@ -14,6 +14,7 @@ import net.runelite.api.Tile;
 import net.runelite.api.TileItem;
 import net.runelite.api.TileObject;
 import net.runelite.api.WallObject;
+import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.util.Text;
@@ -72,7 +73,7 @@ public class SceneApi {
     }
 
     private int npcs(final Lua lua) {
-        final List<NPC> npcs = client.getNpcs();
+        final List<NPC> npcs = npcList();
 
         lua.createTable(npcs.size(), 0);
         int index = 1;
@@ -106,7 +107,7 @@ public class SceneApi {
     }
 
     private int players(final Lua lua) {
-        final List<Player> players = client.getPlayers();
+        final List<Player> players = playerList();
 
         lua.createTable(players.size(), 0);
         int index = 1;
@@ -142,9 +143,9 @@ public class SceneApi {
     }
 
     private int ground_items(final Lua lua) {
-        final Scene scene = client.getScene();
+        final Scene scene = worldView().getScene();
         final Tile[][][] tiles = scene.getTiles();
-        final int plane = client.getPlane();
+        final int plane = worldView().getPlane();
 
         lua.createTable(0, 0);
         int index = 1;
@@ -217,9 +218,9 @@ public class SceneApi {
             }
         }
 
-        final Scene scene = client.getScene();
+        final Scene scene = worldView().getScene();
         final Tile[][][] tiles = scene.getTiles();
-        final int plane = client.getPlane();
+        final int plane = worldView().getPlane();
 
         lua.createTable(0, 0);
         int index = 1;
@@ -337,7 +338,7 @@ public class SceneApi {
      * Accepts a string name (first match) or integer NPC ID.
      */
     private int npc_hull(final Lua lua) {
-        final List<NPC> npcs = client.getNpcs();
+        final List<NPC> npcs = npcList();
         NPC match = null;
 
         if (lua.isString(2)) {
@@ -383,11 +384,11 @@ public class SceneApi {
         final String nameFilter = lua.getTop() >= 4 && lua.isString(4)
             ? lua.toString(4).toLowerCase() : null;
 
-        final Scene scene = client.getScene();
+        final Scene scene = worldView().getScene();
         final Tile[][][] tiles = scene.getTiles();
-        final int plane = client.getPlane();
-        final int baseX = client.getBaseX();
-        final int baseY = client.getBaseY();
+        final int plane = worldView().getPlane();
+        final int baseX = worldView().getBaseX();
+        final int baseY = worldView().getBaseY();
         final int sceneX = worldX - baseX;
         final int sceneY = worldY - baseY;
 
@@ -433,7 +434,7 @@ public class SceneApi {
      * Returns the top menu entry (what left-click would do).
      */
     private int menu_target(final Lua lua) {
-        final MenuEntry[] entries = client.getMenuEntries();
+        final MenuEntry[] entries = client.getMenu().getMenuEntries();
         if (entries == null || entries.length == 0) {
             lua.pushNil();
             return 1;
@@ -448,7 +449,7 @@ public class SceneApi {
      * Returns all current menu entries, top-first.
      */
     private int menu_entries(final Lua lua) {
-        final MenuEntry[] entries = client.getMenuEntries();
+        final MenuEntry[] entries = client.getMenu().getMenuEntries();
         if (entries == null || entries.length == 0) {
             lua.createTable(0, 0);
             return 1;
@@ -514,5 +515,29 @@ public class SceneApi {
     private static void pushBool(final Lua lua, final String key, final boolean value) {
         lua.push(value);
         lua.setField(-2, key);
+    }
+
+    private WorldView worldView() {
+        return client.getTopLevelWorldView();
+    }
+
+    private List<NPC> npcList() {
+        final List<NPC> npcs = new ArrayList<>();
+
+        for (final NPC npc : worldView().npcs()) {
+            npcs.add(npc);
+        }
+
+        return npcs;
+    }
+
+    private List<Player> playerList() {
+        final List<Player> players = new ArrayList<>();
+
+        for (final Player player : worldView().players()) {
+            players.add(player);
+        }
+
+        return players;
     }
 }

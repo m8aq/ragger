@@ -36,9 +36,9 @@ public class CameraApi {
     public double focal_x() { return client.getCameraFocalPointX(); }
     public double focal_y() { return client.getCameraFocalPointY(); }
     public double focal_z() { return client.getCameraFocalPointZ(); }
-    public void set_focal_x(final double x) { client.setCameraFocalPointX(x); }
-    public void set_focal_y(final double y) { client.setCameraFocalPointY(y); }
-    public void set_focal_z(final double z) { client.setCameraFocalPointZ(z); }
+    public void set_focal_x(final double x) { client.setCameraFocalPointX((float) x); }
+    public void set_focal_y(final double y) { client.setCameraFocalPointY((float) y); }
+    public void set_focal_z(final double z) { client.setCameraFocalPointZ((float) z); }
 
     // Shake
     public boolean shake_disabled() { return client.isCameraShakeDisabled(); }
