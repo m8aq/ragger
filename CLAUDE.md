@@ -96,6 +96,7 @@ Pipeline order (managed by `fetch_all.py`):
 - `import_map_squares.py` — Imports map square images from `data/map-squares.zip` into the `map_squares` table. One-time setup.
 - `import_game_vars.py` — Imports game var JSON from `data/game-vars/` (produced by `dumpGameVars`) into the `game_vars` table. Re-run after updating RuneLite.
 - `import_object_locations.py` — Imports interactive object spawn locations from `data/cache-dump/object-locations.json` (produced by `dumpObjectLocations`) into the `object_locations` table.
+- `import_hub_plugins.py` — Imports every RuneLite Plugin Hub plugin's Java sources from the JZomDev/pluginhub-searcher bundles (network fetch, ~35 MB) into `hub_plugins` and `hub_plugin_files`. Re-run whenever to refresh; unchanged plugins are skipped by commit hash.
 
 ### smoke_test.py — validate every step before a full build
 
@@ -257,6 +258,7 @@ All API methods accept a `sqlite3.Connection` so connections can be reused. Per-
 - `GAME_VARIABLE.md` — GameVariable with content/functional tags, values
 - `WIKI.md` — Wiki fetch, parse, cache, attribution utilities
 - `WIKI_PAGE.md` — WikiPage: whole reference pages (mechanics, guides) stored as prose, with title and full-text search
+- `HUB_PLUGIN.md` — HubPlugin, HubPluginFile: Plugin Hub plugin Java sources with substring code search
 - `ENUMS.md` — All enums (Skill, Region, EquipmentSlot, MapLinkType, etc.)
 
 ## RuneLite Plugin

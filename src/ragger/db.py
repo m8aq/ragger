@@ -969,6 +969,23 @@ SCHEMAS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS wiki_pages_source ON wiki_pages (source)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS hub_plugins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        internal_name TEXT NOT NULL UNIQUE,
+        repository TEXT NOT NULL,
+        commit_hash TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS hub_plugin_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plugin_id INTEGER NOT NULL REFERENCES hub_plugins(id) ON DELETE CASCADE,
+        file_name TEXT NOT NULL,
+        content TEXT NOT NULL,
+        UNIQUE (plugin_id, file_name)
+    )
+    """,
     # SQLite treats NULLs as distinct inside a UNIQUE constraint, so two rows that differ
     # only by a NULL key column would not collide. These tables all have nullable key
     # columns, so uniqueness is expressed as an expression index over COALESCE sentinels
