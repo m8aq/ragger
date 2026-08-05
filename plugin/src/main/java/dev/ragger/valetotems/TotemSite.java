@@ -134,6 +134,71 @@ public class TotemSite {
         return new int[]{spirit1, spirit2, spirit3};
     }
 
+    /** The three spirits active near this site right now, nulls omitted. */
+    public List<Spirit> getActiveSpirits() {
+        final List<Spirit> active = new ArrayList<>(3);
+
+        for (final int value : getSpirits()) {
+            final Spirit spirit = Spirit.fromValue(value);
+
+            if (spirit != null) {
+                active.add(spirit);
+            }
+        }
+
+        return active;
+    }
+
+    /** Spirits carved into the low/mid/top segments so far, nulls omitted. */
+    public List<Spirit> getCarvedSpirits() {
+        final List<Spirit> carved = new ArrayList<>(3);
+
+        for (final int value : new int[]{low, mid, top}) {
+            final Spirit spirit = Spirit.fromSegmentValue(value);
+
+            if (spirit != null) {
+                carved.add(spirit);
+            }
+        }
+
+        return carved;
+    }
+
+    /**
+     * Active spirits not yet carved into a segment — what to carve next. The base segment carries
+     * no spirit, so only the three spirit-bearing segments are compared.
+     */
+    public List<Spirit> getSpiritsToCarve() {
+        final List<Spirit> remaining = new ArrayList<>(getActiveSpirits());
+
+        for (final Spirit carved : getCarvedSpirits()) {
+            remaining.remove(carved);
+        }
+
+        return remaining;
+    }
+
+    /**
+     * Spirits carved into a segment that are not among the site's active spirits. Each one costs
+     * 25% of the decoration experience and most of the ent's offerings, so any entry here means
+     * the totem is worth rebuilding. The active spirits can change mid-carve, so this can become
+     * non-empty through no mistake of the player's.
+     */
+    public List<Spirit> getWrongCarvings() {
+        final List<Spirit> active = getActiveSpirits();
+        final List<Spirit> wrong = new ArrayList<>(0);
+
+        for (final Spirit carved : getCarvedSpirits()) {
+            if (active.contains(carved)) {
+                active.remove(carved);
+            } else {
+                wrong.add(carved);
+            }
+        }
+
+        return wrong;
+    }
+
     /** The wood tier standing here, read from the BASE varbit. Null when the site is bare. */
     public WoodType getWood() {
         if (base < 1 || base > WoodType.values().length) {

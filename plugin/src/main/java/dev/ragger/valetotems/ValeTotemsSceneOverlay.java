@@ -18,6 +18,7 @@ import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
 import java.awt.Shape;
+import java.util.List;
 
 /**
  * Draws totem site markers and ent markers on the game viewport.
@@ -84,7 +85,13 @@ public class ValeTotemsSceneOverlay extends Overlay {
             }
 
             final boolean isRecommended = recommended != null && recommended.getNumber() == site.getNumber();
-            final Color color = isRecommended ? SiteColors.RECOMMENDED : SiteColors.forSite(site);
+            final boolean hasWrongCarving = !site.getWrongCarvings().isEmpty();
+
+            Color color = isRecommended ? SiteColors.RECOMMENDED : SiteColors.forSite(site);
+
+            if (hasWrongCarving) {
+                color = SiteColors.EMPTY;
+            }
 
             OverlayUtil.renderPolygon(graphics, poly, color);
 
@@ -145,6 +152,7 @@ public class ValeTotemsSceneOverlay extends Overlay {
 
         if (site.getStage() == SiteStage.EMPTY) {
             text.append("empty");
+            appendSpirits(text, " — carve ", site.getActiveSpirits());
             return text.toString();
         }
 
@@ -154,6 +162,12 @@ public class ValeTotemsSceneOverlay extends Overlay {
 
         text.append(site.getCarvedSegments()).append("/4 carved, ")
             .append(site.getDecorations()).append("/4 dec");
+
+        if (site.getStage() == SiteStage.CARVING) {
+            appendSpirits(text, " — carve ", site.getSpiritsToCarve());
+        }
+
+        appendSpirits(text, " — WRONG: ", site.getWrongCarvings());
 
         if (site.getDecay() > 0) {
             text.append(", ").append(site.getDecay()).append(" durability");
@@ -166,6 +180,22 @@ public class ValeTotemsSceneOverlay extends Overlay {
         }
 
         return text.toString();
+    }
+
+    private void appendSpirits(final StringBuilder text, final String prefix, final List<Spirit> spirits) {
+        if (spirits.isEmpty()) {
+            return;
+        }
+
+        text.append(prefix);
+
+        for (int i = 0; i < spirits.size(); i++) {
+            if (i > 0) {
+                text.append('/');
+            }
+
+            text.append(spirits.get(i).getDisplayName());
+        }
     }
 
     private Polygon tilePoly(final WorldPoint point) {
