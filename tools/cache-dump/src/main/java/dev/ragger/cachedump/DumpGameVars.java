@@ -3,6 +3,16 @@ package dev.ragger.cachedump;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
+import net.runelite.cache.ConfigType;
+import net.runelite.cache.IndexType;
+import net.runelite.cache.definitions.VarbitDefinition;
+import net.runelite.cache.definitions.loaders.VarbitLoader;
+import net.runelite.cache.fs.Archive;
+import net.runelite.cache.fs.ArchiveFiles;
+import net.runelite.cache.fs.FSFile;
+import net.runelite.cache.fs.Index;
+import net.runelite.cache.fs.Store;
+
 import java.io.*;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -50,16 +60,20 @@ public class DumpGameVars {
 
     record VarSource(String className, String sourcePath) {}
 
-    record VarEntry(String name, int id, String comment) {}
+    /** varp/lsb/msb/bits are cache varbit structure fields, present only for var_type "varbit". */
+    record VarEntry(String name, int id, String comment, Integer varp, Integer lsb, Integer msb, Integer bits) {}
 
     record VarFile(String var_type, List<VarEntry> entries) {}
 
     public static void main(String[] args) throws Exception {
         String output = "../../data/game-vars";
+        String cachePath = null;
 
         for (int i = 0; i < args.length; i++) {
             if ("--output".equals(args[i]) && i + 1 < args.length) {
                 output = args[++i];
+            } else if ("--cache".equals(args[i]) && i + 1 < args.length) {
+                cachePath = args[++i];
             }
         }
 
@@ -68,6 +82,7 @@ public class DumpGameVars {
 
         // Find the sources JAR on the classpath for comment extraction
         Map<String, Map<String, String>> allComments = findAndParseSourceJars();
+        Map<Integer, VarbitDefinition> varbitStructures = loadVarbitStructures(cachePath);
 
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
@@ -84,7 +99,15 @@ public class DumpGameVars {
                     String name = field.getName();
                     int id = field.getInt(null);
                     String comment = comments.get(name);
-                    entries.add(new VarEntry(name, id, comment));
+                    VarbitDefinition structure = "varbit".equals(varType) ? varbitStructures.get(id) : null;
+
+                    if (structure == null) {
+                        entries.add(new VarEntry(name, id, comment, null, null, null, null));
+                    } else {
+                        int lsb = structure.getLeastSignificantBit();
+                        int msb = structure.getMostSignificantBit();
+                        entries.add(new VarEntry(name, id, comment, structure.getIndex(), lsb, msb, msb - lsb + 1));
+                    }
                 }
             }
 
@@ -98,6 +121,33 @@ public class DumpGameVars {
 
             System.out.printf("%s: %d entries -> %s%n", varType, entries.size(), outPath);
         }
+    }
+
+    /**
+     * Load varbit structures (parent varp, bit range) from the game cache's varbit config archive.
+     * Keyed by varbit ID.
+     */
+    private static Map<Integer, VarbitDefinition> loadVarbitStructures(String cachePath) throws Exception {
+        File cacheDir = CacheLoader.resolveCache(cachePath, Path.of("../../data/cache-dump"));
+        Map<Integer, VarbitDefinition> structures = new HashMap<>();
+        VarbitLoader loader = new VarbitLoader();
+
+        try (Store store = new Store(cacheDir)) {
+            store.load();
+
+            Index configs = store.getIndex(IndexType.CONFIGS);
+            Archive archive = configs.getArchive(ConfigType.VARBIT.getId());
+            byte[] archiveData = store.getStorage().loadArchive(archive);
+            ArchiveFiles files = archive.getFiles(archiveData);
+
+            for (FSFile file : files.getFiles()) {
+                VarbitDefinition def = loader.load(file.getFileId(), file.getContents());
+                structures.put(def.getId(), def);
+            }
+        }
+
+        System.out.printf("Loaded %d varbit structures from cache%n", structures.size());
+        return structures;
     }
 
     private static boolean isConstant(Field field) {
